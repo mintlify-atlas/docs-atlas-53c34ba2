@@ -1,0 +1,443 @@
+---
+title: Running Locally
+description: Start the Haggle development servers and test the application
+---
+
+## Overview
+
+Haggle consists of three main components:
+1. **Backend API** (FastAPI) - Main service on port 8000
+2. **Frontend** (Next.js) - Web interface on port 3000
+3. **Voice Backend** (Optional) - Call service on port 6000
+
+## Quick Start
+
+<Steps>
+  <Step title="Start the Backend API">
+    From the project root, start the FastAPI server:
+    
+    <CodeGroup>
+    ```bash Development Mode
+    uvicorn main:app --reload
+    ```
+    
+    ```bash Custom Port
+    uvicorn main:app --reload --port 8000
+    ```
+    
+    ```bash Custom Host
+    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    ```
+    
+    ```bash Direct Execution
+    python main.py
+    # Runs on http://0.0.0.0:8000
+    ```
+    </CodeGroup>
+    
+    <Check>
+      The server is ready when you see:
+      ```
+      ✅ Database initialized
+      🚀 Haggle Service Marketplace API is running!
+      INFO:     Application startup complete.
+      ```
+    </Check>
+    
+    The API will be available at:
+    - **Main:** http://localhost:8000
+    - **Docs:** http://localhost:8000/docs (Swagger UI)
+    - **ReDoc:** http://localhost:8000/redoc
+  </Step>
+
+  <Step title="Start the Frontend">
+    In a new terminal, navigate to the frontend directory and start Next.js:
+    
+    <CodeGroup>
+    ```bash npm
+    cd frontend
+    npm run dev
+    ```
+    
+    ```bash yarn
+    cd frontend
+    yarn dev
+    ```
+    
+    ```bash pnpm
+    cd frontend
+    pnpm dev
+    ```
+    
+    ```bash bun
+    cd frontend
+    bun dev
+    ```
+    </CodeGroup>
+    
+    <Check>
+      The frontend is ready when you see:
+      ```
+      ✓ Ready in 2.5s
+      ○ Local:   http://localhost:3000
+      ```
+    </Check>
+    
+    Open http://localhost:3000 in your browser.
+  </Step>
+
+  <Step title="Optional: Start Voice Backend">
+    For voice calling functionality (requires Twilio configuration):
+    
+    ```bash
+    cd backend
+    python app.py
+    # Runs on http://0.0.0.0:6000
+    ```
+    
+    Or with uvicorn:
+    ```bash
+    cd backend
+    uvicorn app:app --reload --port 6000
+    ```
+    
+    <Warning>
+      Voice calling requires:
+      - Twilio account with configured phone number
+      - Public domain/ngrok for webhook callbacks
+      - Additional environment variables (see Configuration)
+    </Warning>
+  </Step>
+</Steps>
+
+## Testing with the CLI
+
+The CLI provides an interactive way to test the backend without the frontend:
+
+### Interactive Mode
+
+Run the CLI and answer prompts:
+
+```bash
+python cli.py
+```
+
+You'll be prompted for:
+1. What do you need help with? (e.g., "fix my leaky faucet")
+2. Your house address
+3. Your ZIP code
+4. Your budget
+5. When do you need this done?
+6. 3-5 clarifying questions
+
+### Demo Mode
+
+Run with pre-filled test data:
+
+```bash
+python cli.py --demo
+```
+
+Demo mode automatically:
+- Uses query: "fix my leaky faucet"
+- Sets address: "123 Main St, San Jose, CA 95126"
+- Sets budget: $200
+- Answers clarifying questions
+- Searches for providers
+- Saves to database
+
+<Accordion title="View CLI Demo Output">
+```
+🔧 HAGGLE SERVICE MARKETPLACE
+Find the best service providers for your needs
+
+🎬 RUNNING IN DEMO MODE
+
+📝 STEP 1: Tell us what you need
+Query: fix my leaky faucet
+House Address: 123 Main St, San Jose, CA 95126
+ZIP Code: 95126
+Budget: $200
+Date Needed: 2025-12-15
+
+──────────────────────────────────────────────────
+
+🧠 STEP 2: Analyzing your request...
+✓ Task identified: plumber
+
+──────────────────────────────────────────────────
+
+❓ STEP 3: Generating clarifying questions...
+✓ Generated questions:
+  1. What is the specific issue you're experiencing?
+  2. Is water actively leaking right now?
+  3. How old is the fixture or pipe with the issue?
+  4. Have you tried any fixes yourself?
+  5. Is this affecting multiple fixtures?
+
+──────────────────────────────────────────────────
+
+💬 STEP 4: Please answer the questions
+Q: What is the specific issue you're experiencing?
+A: The kitchen faucet is dripping constantly
+...
+
+🔍 STEP 6: Searching for providers...
+✓ Found 5 providers!
+
+💾 STEP 7: Saving providers to Supabase...
+✓ Saved 5 providers to Supabase
+
+📊 STEP 8: Results
+
+┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ # ┃ Name                      ┃ Phone         ┃
+┣━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━┫
+┃ 1 ┃ Reliable Plumbing         ┃ (408) 555-0101┃
+┃ 2 ┃ Quick Fix Plumbing        ┃ (408) 555-0102┃
+┗━━━┻━━━━━━━━━━━━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━┛
+
+✅ COMPLETE!
+```
+</Accordion>
+
+## API Endpoints
+
+### Health Check
+
+Verify the API is running:
+
+<CodeGroup>
+```bash curl
+curl http://localhost:8000/
+```
+
+```bash httpie
+http GET http://localhost:8000/
+```
+
+```javascript fetch
+fetch('http://localhost:8000/')
+  .then(res => res.json())
+  .then(data => console.log(data))
+```
+</CodeGroup>
+
+Response:
+```json
+{
+  "service": "Haggle Service Marketplace",
+  "version": "1.0.0",
+  "status": "running",
+  "phase": 1
+}
+```
+
+### Start a Job
+
+Create a new service request:
+
+```bash
+curl -X POST http://localhost:8000/api/start-job \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "fix my toilet",
+    "house_address": "123 Main St, San Jose, CA 95126",
+    "zip_code": "95126",
+    "price_limit": 250,
+    "date_needed": "2025-12-10"
+  }'
+```
+
+Response:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "task": "plumber",
+  "questions": [
+    {
+      "id": "q1",
+      "question": "What is the specific issue with your toilet?"
+    },
+    ...
+  ]
+}
+```
+
+### Complete a Job
+
+Submit answers and search for providers:
+
+```bash
+curl -X POST http://localhost:8000/api/complete-job \
+  -H "Content-Type: application/json" \
+  -d '{
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "answers": {
+      "q1": "The toilet is constantly running",
+      "q2": "Yes, water runs non-stop",
+      "q3": "About 10 years old",
+      "q4": "No water damage visible",
+      "q5": "Not an emergency, can wait a day"
+    }
+  }'
+```
+
+### Get Providers for a Job
+
+Retrieve all providers found for a job:
+
+```bash
+curl http://localhost:8000/api/providers/{job_id}
+```
+
+### Check Provider Status
+
+Get real-time status of provider calls:
+
+```bash
+curl http://localhost:8000/api/providers/{job_id}/status
+```
+
+Response:
+```json
+[
+  {
+    "id": 1,
+    "job_id": "550e8400-...",
+    "name": "Reliable Plumbing Services",
+    "phone": "(408) 555-0101",
+    "estimated_price": 150.0,
+    "negotiated_price": 125.0,
+    "call_status": "completed",
+    "call_transcript": "[USER]: Hi, is this Reliable Plumbing?..."
+  }
+]
+```
+
+## Development Workflow
+
+<Steps>
+  <Step title="Make Code Changes">
+    Both servers support hot reload:
+    - **Backend:** Uvicorn auto-reloads on .py file changes
+    - **Frontend:** Next.js fast refresh on component changes
+    
+    <Info>
+      Changes to `config.py` or `.env` require manual server restart.
+    </Info>
+  </Step>
+
+  <Step title="Test Your Changes">
+    Use the interactive API docs:
+    
+    1. Navigate to http://localhost:8000/docs
+    2. Expand any endpoint
+    3. Click "Try it out"
+    4. Fill in parameters
+    5. Click "Execute"
+    
+    Or use the CLI for end-to-end testing:
+    ```bash
+    python cli.py --demo
+    ```
+  </Step>
+
+  <Step title="Check the Database">
+    View stored data in Supabase:
+    
+    1. Open your [Supabase Dashboard](https://supabase.com/dashboard)
+    2. Navigate to **Table Editor**
+    3. Select the `providers` table
+    4. View all entries created by your tests
+    
+    Or query via the API:
+    ```bash
+    curl http://localhost:8000/api/providers
+    ```
+  </Step>
+</Steps>
+
+## Port Reference
+
+| Service | Port | URL | Description |
+|---------|------|-----|-------------|
+| Backend API | 8000 | http://localhost:8000 | Main FastAPI service |
+| Frontend | 3000 | http://localhost:3000 | Next.js web interface |
+| Voice Backend | 6000 | http://localhost:6000 | Twilio voice calling |
+| API Docs | 8000 | http://localhost:8000/docs | Swagger UI |
+| ReDoc | 8000 | http://localhost:8000/redoc | API documentation |
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Port already in use">
+    If port 8000 or 3000 is already in use:
+    
+    **Backend:**
+    ```bash
+    uvicorn main:app --reload --port 8001
+    ```
+    
+    **Frontend:**
+    ```bash
+    npm run dev -- -p 3001
+    ```
+    
+    Update the frontend API calls to point to the new backend port.
+  </Accordion>
+  
+  <Accordion title="Module not found errors">
+    Ensure you've installed dependencies:
+    
+    **Backend:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+    **Frontend:**
+    ```bash
+    cd frontend && npm install
+    ```
+    
+    If using a virtual environment, make sure it's activated.
+  </Accordion>
+  
+  <Accordion title="Database connection errors">
+    Verify your Supabase configuration:
+    
+    1. Check `SUPABASE_URL` and `SUPABASE_KEY` in `config.py`
+    2. Ensure the `providers` table exists
+    3. Test connection:
+       ```bash
+       python -c "from db.models import init_db; init_db()"
+       ```
+    
+    You should see:
+    ```
+    ✅ Supabase client initialized
+    ```
+  </Accordion>
+  
+  <Accordion title="Grok API errors">
+    If you see "No XAI_API_KEY set" warnings:
+    
+    - **This is normal** - Haggle uses fallback logic when no API key is configured
+    - To use real Grok LLM, add your API key to `config.py`:
+      ```python
+      XAI_API_KEY = "your-xai-api-key-here"
+      ```
+    - Restart the server after adding the key
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore all API endpoints
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/platform/architecture">
+    Understand the system architecture
+  </Card>
+</CardGroup>

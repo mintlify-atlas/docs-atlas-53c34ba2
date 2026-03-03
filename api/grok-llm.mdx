@@ -1,0 +1,326 @@
+---
+title: Grok LLM Service
+description: AI-powered task inference and negotiation using xAI's Grok models
+---
+
+## Overview
+
+The Grok LLM service leverages xAI's Grok-3-fast model to provide intelligent task classification, clarifying question generation, and price extraction from call transcripts. This service is central to Haggle's ability to understand user requests and facilitate automated negotiations.
+
+**Source**: `services/grok_llm.py`
+
+## API Functions
+
+### infer_task()
+
+Classifies user queries into specific service task types.
+
+<ParamField path="query" type="str" required>
+  User's free text query describing their service need (e.g., "fix my toilet", "my lawn is too long")
+</ParamField>
+
+<ResponseField name="task" type="str">
+  Inferred service task type such as "plumber", "electrician", "house cleaner", "painter", "handyman", "HVAC technician", "locksmith", "carpenter", "landscaper", "appliance repair", "pest control", "roofer", "moving company", or "auto mechanic"
+</ResponseField>
+
+```python
+from services.grok_llm import infer_task
+
+# Classify a user's service request
+task = await infer_task("my kitchen sink is leaking everywhere")
+print(task)  # Output: "plumber"
+
+task = await infer_task("need someone to mow my overgrown yard")
+print(task)  # Output: "landscaper"
+```
+
+**How It Works:**
+
+1. Sends query to Grok-3-fast with a specialized system prompt
+2. Uses streaming response to collect the classification
+3. Falls back to keyword-based classification if API is unavailable
+4. Returns normalized, lowercase task type
+
+**System Prompt:**
+The function uses a prompt that instructs Grok to respond with only a single word or short phrase identifying the service professional needed, ensuring concise and consistent responses.
+
+---
+
+### generate_clarifying_questions()
+
+Generates 3-5 context-specific questions to understand job requirements better.
+
+<ParamField path="task" type="str" required>
+  The inferred task type (e.g., "plumber", "electrician")
+</ParamField>
+
+<ParamField path="query" type="str" required>
+  Original user query
+</ParamField>
+
+<ParamField path="zip_code" type="str" required>
+  User's zip code (already collected, won't be asked again)
+</ParamField>
+
+<ParamField path="date_needed" type="str" required>
+  When service is needed (already collected, won't be asked again)
+</ParamField>
+
+<ParamField path="price_limit" type="Union[float, str]" required>
+  Maximum price user is willing to pay (already collected, won't be asked again)
+</ParamField>
+
+<ResponseField name="questions" type="List[Dict[str, str]]">
+  List of question objects, each containing:
+  - `id`: Unique question identifier (e.g., "q1", "q2")
+  - `question`: The clarifying question text
+  
+  Maximum of 5 questions returned.
+</ResponseField>
+
+```python
+from services.grok_llm import generate_clarifying_questions
+
+questions = await generate_clarifying_questions(
+    task="plumber",
+    query="fix my toilet",
+    zip_code="94102",
+    date_needed="2024-03-15",
+    price_limit=200.0
+)
+
+print(questions)
+# Output:
+# [
+#   {"id": "q1", "question": "What is the specific issue you're experiencing?"},
+#   {"id": "q2", "question": "Is water actively leaking right now?"},
+#   {"id": "q3", "question": "How old is the fixture or pipe with the issue?"},
+#   {"id": "q4", "question": "Have you tried any fixes yourself?"},
+#   {"id": "q5", "question": "Is this affecting multiple fixtures?"}
+# ]
+```
+
+**Important Rules:**
+- Never asks about location, date, or budget (already provided)
+- Generates task-specific questions that help providers give accurate estimates
+- Automatically parses numbered responses and cleans formatting
+- Falls back to predefined questions if API is unavailable
+
+---
+
+### format_problem_statement()
+
+Converts first-person user queries into second-person problem descriptions.
+
+<ParamField path="original_query" type="str" required>
+  The user's original query in first person (e.g., "my lawn is too long")
+</ParamField>
+
+<ParamField path="task" type="str" required>
+  The inferred task type (e.g., "landscaper", "plumber")
+</ParamField>
+
+<ResponseField name="statement" type="str">
+  Formatted problem statement in second person, suitable for provider communication (e.g., "your lawn needs to be mowed")
+</ResponseField>
+
+```python
+from services.grok_llm import format_problem_statement
+
+statement = await format_problem_statement(
+    original_query="my lawn is too long and needs cutting",
+    task="landscaper"
+)
+print(statement)  # Output: "your lawn needs to be mowed"
+
+statement = await format_problem_statement(
+    original_query="fix my toilet",
+    task="plumber"
+)
+print(statement)  # Output: "your toilet needs to be fixed"
+```
+
+**Formatting Rules:**
+1. Converts first person to second person ("my" → "your")
+2. Single sentence output only
+3. Removes quotes and trailing periods
+4. Natural, conversational language
+5. Uses action phrases like "needs to be fixed", "is leaking", etc.
+
+---
+
+### extract_negotiated_price()
+
+Extracts the final agreed-upon price from a call transcript using LLM analysis.
+
+<ParamField path="transcript" type="List[Dict[str, str]]" required>
+  List of transcript entries, where each entry contains:
+  - `role`: Either "user" or "assistant"
+  - `text`: The spoken text for that turn
+</ParamField>
+
+<ResponseField name="price" type="Optional[float]">
+  The negotiated price as a float, or `None` if no price was agreed upon
+</ResponseField>
+
+```python
+from services.grok_llm import extract_negotiated_price
+
+transcript = [
+    {"role": "assistant", "text": "Hi, is this ABC Plumbing?"},
+    {"role": "user", "text": "Yes, how can I help you?"},
+    {"role": "assistant", "text": "I need my toilet fixed. What would that cost?"},
+    {"role": "user", "text": "I can do it for $150."},
+    {"role": "assistant", "text": "Can you do $125?"},
+    {"role": "user", "text": "How about we meet in the middle at $135?"},
+    {"role": "assistant", "text": "That works for me, thank you!"}
+]
+
+price = await extract_negotiated_price(transcript)
+print(price)  # Output: 135.0
+```
+
+**Extraction Logic:**
+1. Formats transcript with `[USER]` and `[ASSISTANT]` prefixes
+2. Sends to Grok with instructions to find the final agreed price
+3. Looks for the last price mentioned that both parties accepted
+4. Parses numeric values from various formats ("$125", "one hundred twenty five dollars", etc.)
+5. Returns `None` if no agreement was reached
+6. Falls back to regex-based extraction if API unavailable
+
+**Fallback Regex Patterns:**
+- `$XXX` format: `$125`, `$125.50`
+- "XXX dollars" format: `125 dollars`
+- "agreed on XXX"
+- "XXX for the job"
+- "price is XXX"
+
+---
+
+## Configuration
+
+### Environment Variables
+
+<ParamField path="XAI_API_KEY" type="str" required>
+  Your xAI API key for accessing Grok models. Get one at [x.ai](https://x.ai/)
+</ParamField>
+
+```bash
+# .env file
+XAI_API_KEY=your_xai_api_key_here
+```
+
+### Model Configuration
+
+All functions use the **grok-3-fast** model with streaming responses:
+
+```python
+from xai_sdk import Client
+
+client = Client(api_key=XAI_API_KEY)
+chat = client.chat.create(model="grok-3-fast")
+
+# Streaming response handling
+full_response = ""
+for response, chunk in chat.stream():
+    if chunk.content:
+        full_response += chunk.content
+```
+
+---
+
+## Fallback Behavior
+
+All functions include fallback logic when the API is unavailable:
+
+**Task Inference Fallback:**
+Keyword matching against common terms:
+- "toilet", "pipe", "leak" → plumber
+- "electric", "outlet", "wire" → electrician
+- "clean", "maid" → house cleaner
+- "paint", "wall" → painter
+- Defaults to "handyman" if no match
+
+**Questions Fallback:**
+Predefined question sets for common tasks (plumber, electrician, house cleaner, painter)
+
+**Problem Statement Fallback:**
+Simple string replacement: "my" → "your", "I need" → "you need"
+
+**Price Extraction Fallback:**
+Regex-based extraction looking for dollar amounts in various formats
+
+---
+
+## Error Handling
+
+All functions gracefully handle API errors:
+
+```python
+try:
+    # API call logic
+    client = Client(api_key=XAI_API_KEY)
+    chat = client.chat.create(model="grok-3-fast")
+    # ...
+except Exception as e:
+    print(f"Grok API exception: {e}")
+    return _fallback_function(params)
+```
+
+**Common Error Scenarios:**
+- Missing or invalid API key → Uses fallback
+- Network timeout → Uses fallback
+- Rate limiting → Uses fallback
+- Invalid response format → Uses fallback
+
+---
+
+## Integration Example
+
+Complete workflow using multiple Grok LLM functions:
+
+```python
+from services.grok_llm import (
+    infer_task,
+    generate_clarifying_questions,
+    format_problem_statement,
+    extract_negotiated_price
+)
+
+# Step 1: Infer task from user query
+user_query = "my kitchen sink won't stop dripping"
+task = await infer_task(user_query)
+print(f"Task: {task}")  # "plumber"
+
+# Step 2: Format problem statement
+problem = await format_problem_statement(user_query, task)
+print(f"Problem: {problem}")  # "your kitchen sink is leaking"
+
+# Step 3: Generate clarifying questions
+questions = await generate_clarifying_questions(
+    task=task,
+    query=user_query,
+    zip_code="94102",
+    date_needed="2024-03-20",
+    price_limit=200.0
+)
+
+for q in questions:
+    print(f"{q['id']}: {q['question']}")
+
+# Step 4: After call completes, extract price
+transcript = [...]  # Call transcript
+price = await extract_negotiated_price(transcript)
+if price:
+    print(f"Final price: ${price}")
+else:
+    print("No agreement reached")
+```
+
+---
+
+## See Also
+
+- [Grok Search Service](/api/grok-search) - Find service providers
+- [Voice Agent](/api/voice-agent) - Automated negotiation calls
+- [xAI SDK Documentation](https://docs.x.ai/docs/guides/chat) - Official Grok API docs

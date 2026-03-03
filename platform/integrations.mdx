@@ -1,0 +1,865 @@
+---
+title: Third-Party Integrations
+description: External services and APIs integrated into Haggle
+---
+
+## Overview
+
+Haggle integrates with multiple AI and communication services to power its marketplace and voice negotiation features.
+
+<CardGroup cols={3}>
+  <Card title="Grok LLM" icon="brain">
+    Task inference and question generation
+  </Card>
+  <Card title="Grok Realtime" icon="phone">
+    AI voice agent for negotiations
+  </Card>
+  <Card title="OpenAI Search" icon="magnifying-glass">
+    Web search for finding providers
+  </Card>
+  <Card title="Twilio Voice" icon="phone-volume">
+    Phone call infrastructure
+  </Card>
+  <Card title="Supabase" icon="database">
+    Managed PostgreSQL database
+  </Card>
+  <Card title="xAI SDK" icon="code">
+    Python client for Grok API
+  </Card>
+</CardGroup>
+
+---
+
+## Grok LLM (xAI)
+
+### Overview
+
+Grok LLM powers the intelligent task inference and context generation features using xAI's official Python SDK.
+
+**Model:** `grok-3-fast`  
+**API Endpoint:** `https://api.x.ai/v1/chat`  
+**Documentation:** [https://docs.x.ai/docs/guides/chat](https://docs.x.ai/docs/guides/chat)
+
+### Use Cases
+
+<AccordionGroup>
+  <Accordion title="Task Inference">
+    Converts free-text user queries into structured service types.
+    
+    **Function:** `infer_task(query: str) -> str`
+    
+    **Example:**
+    <CodeGroup>
+    ```python Request
+    task = await infer_task("my toilet is broken and leaking")
+    # Returns: "plumber"
+    ```
+    
+    ```python Implementation
+    from xai_sdk import Client
+    from xai_sdk.chat import user, system
+    
+    client = Client(api_key=XAI_API_KEY)
+    chat = client.chat.create(model="grok-3-fast")
+    
+    chat.append(system("""You are a service task classifier..."""))
+    chat.append(user(f"What type of service professional is needed for: {query}"))
+    
+    full_response = ""
+    for response, chunk in chat.stream():
+        if chunk.content:
+            full_response += chunk.content
+    
+    task = full_response.strip().lower()
+    ```
+    </CodeGroup>
+    
+    **System Prompt:**
+    ```
+    You are a service task classifier. Given a user's request, 
+    identify the type of service professional needed.
+    
+    Respond with ONLY a single word or short phrase for the service type, such as:
+    - plumber
+    - electrician
+    - house cleaner
+    - painter
+    - handyman
+    - HVAC technician
+    - locksmith
+    ```
+  </Accordion>
+  
+  <Accordion title="Clarifying Questions">
+    Generates 3-5 context-specific questions to understand job requirements.
+    
+    **Function:** `generate_clarifying_questions(...) -> List[Dict[str, str]]`
+    
+    **Example:**
+    <CodeGroup>
+    ```python Request
+    questions = await generate_clarifying_questions(
+        task="plumber",
+        query="fix my toilet",
+        zip_code="95126",
+        date_needed="2025-12-10",
+        price_limit=250
+    )
+    ```
+    
+    ```json Response
+    [
+        {"id": "q1", "question": "What is the specific issue with your toilet?"},
+        {"id": "q2", "question": "Is the toilet running constantly or leaking?"},
+        {"id": "q3", "question": "How old is your toilet?"},
+        {"id": "q4", "question": "Have you noticed any water damage?"},
+        {"id": "q5", "question": "Is this an emergency?"}
+    ]
+    ```
+    </CodeGroup>
+    
+    **Key rules enforced in system prompt:**
+    - Do NOT ask about location (already provided)
+    - Do NOT ask about timing (already provided)
+    - Do NOT ask about budget (already provided)
+    - Maximum 5 questions
+    - Focus on work specifics
+  </Accordion>
+  
+  <Accordion title="Problem Statement Formatting">
+    Converts first-person queries into second-person problem descriptions for AI agent.
+    
+    **Function:** `format_problem_statement(original_query: str, task: str) -> str`
+    
+    **Example:**
+    <CodeGroup>
+    ```python Request
+    problem = await format_problem_statement("my lawn is too long", "landscaper")
+    # Returns: "your lawn needs to be mowed"
+    ```
+    
+    ```python Transformations
+    "fix my toilet" → "your toilet needs to be fixed"
+    "my faucet is leaking" → "your faucet is leaking"
+    "I need my house painted" → "your house needs to be painted"
+    ```
+    </CodeGroup>
+  </Accordion>
+  
+  <Accordion title="Price Extraction">
+    Analyzes call transcripts to extract negotiated prices.
+    
+    **Function:** `extract_negotiated_price(transcript: List[Dict]) -> Optional[float]`
+    
+    **Example:**
+    <CodeGroup>
+    ```python Request
+    transcript = [
+        {"role": "assistant", "text": "How much would you charge?"},
+        {"role": "user", "text": "I can do it for $175"},
+        {"role": "assistant", "text": "That sounds good, let's go with $175"}
+    ]
+    
+    price = await extract_negotiated_price(transcript)
+    # Returns: 175.0
+    ```
+    
+    ```python Implementation
+    system_prompt = """You are analyzing a phone call transcript...
+    Extract the FINAL AGREED-UPON PRICE.
+    
+    Rules:
+    1. Look for final price, not initial quotes
+    2. Respond with only the number (e.g., "125")
+    3. If no agreement, respond with "none"
+    """
+    
+    # Parse response
+    if price_str == "none" or "no" in price_str:
+        return None
+    
+    numbers = re.findall(r'\d+\.?\d*', price_str)
+    return float(numbers[0]) if numbers else None
+    ```
+    </CodeGroup>
+  </Accordion>
+</AccordionGroup>
+
+### Configuration
+
+```python Environment Variables
+XAI_API_KEY=your_xai_api_key_here
+```
+
+**Fallback behavior:** If no API key is set, uses rule-based fallbacks:
+- Task inference: keyword matching ("toilet" → "plumber")
+- Questions: predefined question sets per task type
+- Problem formatting: simple string replacement
+- Price extraction: regex pattern matching
+
+### SDK Usage
+
+<CodeGroup>
+```python Installation
+pip install xai-sdk
+```
+
+```python Basic Chat
+from xai_sdk import Client
+from xai_sdk.chat import user, system
+
+client = Client(api_key=XAI_API_KEY)
+chat = client.chat.create(model="grok-3-fast")
+
+chat.append(system("You are a helpful assistant"))
+chat.append(user("What is 2+2?"))
+
+for response, chunk in chat.stream():
+    if chunk.content:
+        print(chunk.content, end="")
+```
+
+```python Streaming Response
+# Grok SDK uses generator-based streaming
+full_response = ""
+for response, chunk in chat.stream():
+    if chunk.content:
+        full_response += chunk.content
+
+print(full_response)
+```
+</CodeGroup>
+
+**Location:** `/workspace/source/services/grok_llm.py`
+
+---
+
+## Grok Realtime API (xAI)
+
+### Overview
+
+Grok Realtime API provides low-latency voice conversations via WebSocket for the AI negotiation agent.
+
+**Endpoint:** `wss://api.x.ai/v1/realtime`  
+**Protocol:** WebSocket  
+**Audio Format:** PCM 24kHz (bidirectional)
+
+### Voice Agent Flow
+
+<Steps>
+  <Step title="Connect WebSocket">
+    ```python
+    import websockets
+    
+    GROK_URL = "wss://api.x.ai/v1/realtime"
+    API_KEY = os.getenv("XAI_API_KEY")
+    
+    async with websockets.connect(
+        GROK_URL, 
+        additional_headers={"Authorization": f"Bearer {API_KEY}"}
+    ) as grok_ws:
+        # Connection established
+    ```
+  </Step>
+  
+  <Step title="Configure Session">
+    ```json
+    {
+        "type": "session.update",
+        "session": {
+            "voice": "Rex",
+            "instructions": "YOU ARE a homeowner calling for service...",
+            "turn_detection": {"type": "server_vad"},
+            "audio": {
+                "input": {"format": {"type": "audio/pcm", "rate": 24000}},
+                "output": {"format": {"type": "audio/pcm", "rate": 24000}}
+            }
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Trigger Initial Greeting">
+    ```json
+    {"type": "response.create"}
+    ```
+    This tells Grok to generate its first message immediately.
+  </Step>
+  
+  <Step title="Stream Audio (Twilio → Grok)">
+    ```python
+    # Convert Twilio μ-law to Grok PCM 24kHz
+    mulaw = base64.b64decode(twilio_payload)
+    pcm_8k = audioop.ulaw2lin(mulaw, 2)
+    pcm_24k, _ = audioop.ratecv(pcm_8k, 2, 1, 8000, 24000, None)
+    
+    await grok_ws.send(json.dumps({
+        "type": "input_audio_buffer.append",
+        "audio": base64.b64encode(pcm_24k).decode('utf-8')
+    }))
+    ```
+  </Step>
+  
+  <Step title="Stream Audio (Grok → Twilio)">
+    ```python
+    # Convert Grok PCM 24kHz to Twilio μ-law
+    event = json.loads(msg)
+    if event['type'] == 'response.output_audio.delta':
+        pcm_24k = base64.b64decode(event['delta'])
+        pcm_8k, _ = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, None)
+        mulaw = audioop.lin2ulaw(pcm_8k, 2)
+        
+        await twilio_ws.send_json({
+            "event": "media",
+            "streamSid": stream_sid,
+            "media": {"payload": base64.b64encode(mulaw).decode()}
+        })
+    ```
+  </Step>
+  
+  <Step title="Capture Transcript">
+    ```python
+    # User speech
+    if event['type'] == 'conversation.item.input_audio_transcription.completed':
+        transcript.append({"role": "user", "text": event['transcript']})
+    
+    # AI speech
+    if event['type'] == 'response.audio_transcript.done':
+        transcript.append({"role": "assistant", "text": event['transcript']})
+    ```
+  </Step>
+</Steps>
+
+### Event Types
+
+<Accordion title="Input Events (Client → Grok)">
+| Event Type | Description |
+|------------|-------------|
+| `session.update` | Configure voice, instructions, VAD |
+| `response.create` | Trigger AI response generation |
+| `input_audio_buffer.append` | Send audio chunk |
+| `conversation.item.create` | Add text message |
+</Accordion>
+
+<Accordion title="Output Events (Grok → Client)">
+| Event Type | Description |
+|------------|-------------|
+| `response.output_audio.delta` | Audio chunk from AI |
+| `response.audio_transcript.done` | Full AI transcript |
+| `conversation.item.input_audio_transcription.completed` | User transcript |
+| `response.done` | AI response complete |
+| `error` | Error occurred |
+</Accordion>
+
+### Negotiation Prompt
+
+<CodeGroup>
+```python Dynamic Prompt Generation
+def generate_prompt(provider: dict) -> str:
+    return f"""
+YOU ARE a homeowner in zip code {provider['zip_code']} calling for service.
+{provider['problem']}.
+YOU ARE NOT an AI. You are a real person speaking to {provider['service_provider']}.
+Your tone should be casual, direct, and slightly cost-conscious.
+Refer to the following context if needed: {provider['context_answers']}
+
+1. You must begin with: "Hi, is this {provider['service_provider']}?"
+2. After confirming, ask for a price estimate.
+3. Negotiate to secure the lowest price, using **${provider['max_price']}** as target.
+4. Agreeing to a price up to ${provider['max_price']} is acceptable.
+
+End the call based on outcome:
+    - No Agreement: "Thank you for the info. I need to think about it."
+    - Price Agreed: "Thank you! I will reach out to you again shortly."
+"""
+```
+
+```json Example Configuration
+{
+  "voice": "Rex",
+  "instructions": "YOU ARE a homeowner in zip code 95126 calling for service. your toilet needs to be fixed. YOU ARE NOT an AI. You are a real person speaking to Reliable Plumbing Services. Your tone should be casual, direct, and slightly cost-conscious. Refer to the following context if needed: What is the specific issue? The toilet is constantly running. Is water actively leaking? Yes, non-stop.\n\n1. You must begin with: 'Hi, is this Reliable Plumbing Services?'\n2. After confirming, ask for a price estimate.\n3. Negotiate to secure the lowest price, using **$250** as target.\n4. Agreeing to a price up to $250 is acceptable.\n\nEnd the call based on outcome:\n    - No Agreement: 'Thank you for the info. I need to think about it.'\n    - Price Agreed: 'Thank you! I will reach out to you again shortly.'"
+}
+```
+</CodeGroup>
+
+**Location:** `/workspace/source/backend/app.py:41`
+
+---
+
+## OpenAI Web Search
+
+### Overview
+
+OpenAI's Responses API with web search tool finds local service providers.
+
+**Model:** `gpt-4o`  
+**Tool:** `web_search_preview`  
+**API Endpoint:** `https://api.openai.com/v1/responses`
+
+### Implementation
+
+<CodeGroup>
+```python Search Request
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=OPENAI_API_KEY, 
+    organization=OPENAI_ORG_API_KEY
+)
+
+search_prompt = f"""Find {task} services near zip code {zip_code}.
+
+Search the web for local {task}s and provide a list with:
+1. Business name
+2. Phone number
+
+Format each result as: NAME | PHONE
+
+Find up to 5 providers near {zip_code}."""
+
+response = client.responses.create(
+    model="gpt-4o",
+    tools=[{"type": "web_search_preview"}],
+    input=search_prompt
+)
+
+full_response = response.output_text
+```
+
+```python Parse Results
+import re
+
+phone_pattern = re.compile(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}')
+providers = []
+
+for line in full_response.split("\n"):
+    phone_match = phone_pattern.search(line)
+    if not phone_match:
+        continue
+    
+    phone = phone_match.group()
+    name_part = line[:phone_match.start()]
+    
+    # Clean name (remove numbering, asterisks, etc.)
+    name = re.sub(r'^[\d]+[.\)]\s*', '', name_part)
+    name = name.strip('*-|: ')
+    
+    providers.append(ProviderCreate(
+        job_id=job_id,
+        name=name,
+        phone=phone
+    ))
+```
+
+```text Example Response
+1. **Reliable Plumbing Services** | (408) 555-0101
+2. Quick Drain Solutions | (408) 555-0102
+3. Bay Area Master Plumbers | 408-555-0103
+4. 24/7 Emergency Plumbing | (408) 555.0104
+5. Budget Plumbing Co. | 408 555 0105
+```
+</CodeGroup>
+
+### Configuration
+
+```bash Environment Variables
+OPENAI_API_KEY=sk-proj-...
+OPENAI_ORG_API_KEY=org-...  # Optional
+```
+
+**Fallback providers:** If API key is missing or request fails, returns mock data:
+
+<CodeGroup>
+```python Fallback Data
+fallback_providers = {
+    "plumber": [
+        ("Reliable Plumbing Services", "(408) 555-0101"),
+        ("Quick Drain Solutions", "(408) 555-0102"),
+        ("Bay Area Master Plumbers", "(408) 555-0103"),
+        ("24/7 Emergency Plumbing", "(408) 555-0104"),
+        ("Budget Plumbing Co.", "(408) 555-0105"),
+    ],
+    "electrician": [...],
+    "house cleaner": [...],
+    # etc.
+}
+```
+</CodeGroup>
+
+**Location:** `/workspace/source/services/grok_search.py`
+
+---
+
+## Twilio Voice API
+
+### Overview
+
+Twilio provides phone call infrastructure for connecting to service providers.
+
+**API Version:** Twilio REST API  
+**Media Streams:** WebSocket-based audio streaming
+
+### Call Flow
+
+<Steps>
+  <Step title="Initiate Call">
+    ```python
+    from twilio.rest import Client
+    
+    client = Client(TWILIO_SID, TWILIO_TOKEN)
+    
+    twiml_url = f"https://{DOMAIN}/twiml?provider_id={provider['id']}"
+    client.calls.create(
+        to=provider['phone_number'],
+        from_=FROM_NUMBER,
+        url=twiml_url
+    )
+    ```
+  </Step>
+  
+  <Step title="Return TwiML">
+    ```xml
+    <Response>
+        <Connect>
+            <Stream url="wss://your-domain.com/media-stream">
+                <Parameter name="provider_id" value="123"/>
+            </Stream>
+        </Connect>
+    </Response>
+    ```
+    
+    Generated via FastAPI endpoint:
+    ```python
+    @app.post("/twiml")
+    async def get_twiml(provider_id: str):
+        response = VoiceResponse()
+        connect = Connect()
+        stream = connect.stream(url=f"wss://{DOMAIN}/media-stream")
+        stream.parameter(name="provider_id", value=provider_id)
+        response.append(connect)
+        return HTMLResponse(content=str(response), media_type="application/xml")
+    ```
+  </Step>
+  
+  <Step title="WebSocket Connection">
+    Twilio connects to `/media-stream` WebSocket with audio events:
+    ```json
+    {"event": "start", "start": {"streamSid": "MZ...", "customParameters": {...}}}
+    {"event": "media", "media": {"payload": "base64_mulaw_audio"}}
+    {"event": "stop"}
+    ```
+  </Step>
+  
+  <Step title="Stream Audio">
+    Send audio back to Twilio:
+    ```python
+    await websocket.send_json({
+        "event": "media",
+        "streamSid": stream_sid,
+        "media": {"payload": base64_mulaw}
+    })
+    ```
+  </Step>
+</Steps>
+
+### Audio Format
+
+<Accordion title="Twilio Audio Specs">
+- **Codec:** μ-law (G.711)
+- **Sample Rate:** 8kHz
+- **Channels:** Mono
+- **Encoding:** Base64
+- **Chunk Size:** 20ms frames
+
+**Conversion to Grok format:**
+```python
+import audioop
+
+# Decode from base64
+mulaw = base64.b64decode(payload)
+
+# μ-law to PCM 8kHz
+pcm_8k = audioop.ulaw2lin(mulaw, 2)
+
+# Resample to 24kHz for Grok
+pcm_24k, _ = audioop.ratecv(pcm_8k, 2, 1, 8000, 24000, None)
+
+# Encode to base64 for Grok
+base64.b64encode(pcm_24k).decode('utf-8')
+```
+</Accordion>
+
+### Configuration
+
+```bash Environment Variables
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_PHONE_NUMBER=+1234567890
+DOMAIN=your-ngrok-or-production-domain.com
+```
+
+<Warning>
+  Twilio requires a **public HTTPS endpoint** for webhooks. Use ngrok for local development.
+</Warning>
+
+**Location:** `/workspace/source/backend/app.py`
+
+---
+
+## Supabase
+
+### Overview
+
+Managed PostgreSQL database with Python client library.
+
+**Service:** Supabase (PostgreSQL 15+)  
+**Client:** `supabase-py`
+
+### Setup
+
+<Steps>
+  <Step title="Install Client">
+    ```bash
+    pip install supabase
+    ```
+  </Step>
+  
+  <Step title="Initialize Client">
+    ```python
+    from supabase import create_client, Client
+    
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+    
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    ```
+  </Step>
+  
+  <Step title="Run Migration">
+    Copy SQL from `supabase_migration.sql` and run in Supabase SQL Editor.
+  </Step>
+</Steps>
+
+### Operations
+
+<CodeGroup>
+```python Insert Provider
+data = {
+    "job_id": "550e8400-...",
+    "service_provider": "Reliable Plumbing",
+    "phone_number": "(408) 555-0101",
+    "zip_code": "95126",
+    "max_price": 250.0,
+    "call_status": "pending"
+}
+
+response = supabase.table("providers").insert(data).execute()
+provider_id = response.data[0]['id']
+```
+
+```python Query Providers
+response = supabase.table("providers") \
+    .select("*") \
+    .eq("job_id", job_id) \
+    .execute()
+
+providers = response.data
+```
+
+```python Update Call Status
+update_data = {
+    "call_status": "completed",
+    "negotiated_price": 175.0,
+    "call_transcript": "[USER]: Hello...\n[ASSISTANT]: Hi..."
+}
+
+response = supabase.table("providers") \
+    .update(update_data) \
+    .eq("id", provider_id) \
+    .execute()
+```
+</CodeGroup>
+
+**Location:** `/workspace/source/db/models.py`
+
+---
+
+## API Key Management
+
+<Warning>
+  Never commit API keys to Git. Use environment variables.
+</Warning>
+
+### Environment Variables
+
+<CodeGroup>
+```bash .env File
+# AI Services
+XAI_API_KEY=xai-...
+OPENAI_API_KEY=sk-proj-...
+OPENAI_ORG_API_KEY=org-...  # Optional
+
+# Database
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# Twilio
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_PHONE_NUMBER=+1234567890
+
+# Deployment
+DOMAIN=your-domain.com
+CALL_BACKEND_URL=http://localhost:6000
+```
+
+```python Loading in Python
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+XAI_API_KEY = os.getenv("XAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+# etc.
+```
+</CodeGroup>
+
+### Security Best Practices
+
+<Steps>
+  <Step title="Use Secret Management">
+    - **Development:** `.env` file (not in Git)
+    - **Production:** AWS Secrets Manager, Railway secrets, Vercel env vars
+  </Step>
+  
+  <Step title="Rotate Keys Periodically">
+    - Twilio: Rotate auth tokens every 90 days
+    - OpenAI: Generate new keys, deprecate old ones
+    - Supabase: Use service_role key only on backend
+  </Step>
+  
+  <Step title="Separate Keys by Environment">
+    ```bash
+    # .env.development
+    XAI_API_KEY=xai-dev-key
+    
+    # .env.production
+    XAI_API_KEY=xai-prod-key
+    ```
+  </Step>
+  
+  <Step title="Monitor Usage">
+    - OpenAI Dashboard: Track API usage and costs
+    - Twilio Console: Monitor call volumes
+    - Supabase: Check database queries and bandwidth
+  </Step>
+</Steps>
+
+---
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="Grok LLM Errors">
+    **Common errors:**
+    - Invalid API key
+    - Rate limit exceeded
+    - Network timeout
+    
+    **Handling:**
+    ```python
+    try:
+        task = await infer_task(query)
+    except Exception as e:
+        print(f"Grok API exception: {e}")
+        task = _fallback_infer_task(query)  # Use rule-based fallback
+    ```
+  </Accordion>
+  
+  <Accordion title="OpenAI Search Errors">
+    **Common errors:**
+    - API key missing
+    - Model not available
+    - Search timeout
+    
+    **Handling:**
+    ```python
+    if not OPENAI_API_KEY:
+        print("⚠️  No OPENAI_API_KEY set - using fallback providers")
+        return _fallback_providers(job)
+    
+    try:
+        response = client.responses.create(...)
+    except Exception as e:
+        print(f"OpenAI Search API exception: {e}")
+        return _fallback_providers(job)
+    ```
+  </Accordion>
+  
+  <Accordion title="Twilio Errors">
+    **Common errors:**
+    - Invalid phone number format
+    - Call failed (busy, no answer, etc.)
+    - WebSocket disconnection
+    
+    **Handling:**
+    ```python
+    try:
+        client.calls.create(to=phone, from_=FROM_NUMBER, url=twiml_url)
+    except Exception as e:
+        print(f"❌ Failed to dial {provider['service_provider']}: {e}")
+        update_provider_call_status(provider_id, "failed")
+    ```
+  </Accordion>
+  
+  <Accordion title="Supabase Errors">
+    **Common errors:**
+    - Connection timeout
+    - Invalid credentials
+    - Row Level Security policy violation
+    
+    **Handling:**
+    ```python
+    try:
+        response = supabase.table("providers").insert(data).execute()
+        if not response.data:
+            raise Exception("Failed to create provider in Supabase")
+    except Exception as e:
+        print(f"Database error: {e}")
+        # Log error, retry, or return error to user
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Rate Limits
+
+| Service | Free Tier | Rate Limit | Notes |
+|---------|-----------|------------|---------|
+| Grok LLM | Unknown | Unknown | Contact xAI for details |
+| OpenAI API | $5 credit | 500 RPM | Tier 1 (pay-as-you-go) |
+| Twilio | Trial credit | 1 call/sec | Upgrade for higher limits |
+| Supabase | Free tier | 500 MB DB | Unlimited API requests |
+
+<Note>
+  Production deployments should use paid tiers with higher rate limits.
+</Note>
+
+## Cost Estimation
+
+Per job (1 user request):
+
+| Service | Operation | Cost |
+|---------|-----------|------|
+| Grok LLM | Task inference | ~$0.001 |
+| Grok LLM | 5 questions | ~$0.002 |
+| OpenAI | Web search | ~$0.01 |
+| Grok Realtime | 2-min call × 5 providers | ~$0.50 |
+| Twilio | 2-min call × 5 providers | ~$0.20 |
+| Supabase | DB operations | Free |
+| **Total** | | **~$0.73** |
+
+<Warning>
+  Costs are estimates. Monitor actual usage via provider dashboards.
+</Warning>

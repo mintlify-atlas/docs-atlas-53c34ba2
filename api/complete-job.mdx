@@ -1,0 +1,248 @@
+---
+title: 'POST /api/complete-job'
+description: 'Complete a job with clarification answers and receive matched providers'
+---
+
+## Endpoint
+
+```
+POST /api/complete-job
+```
+
+## Description
+
+Completes a job by submitting answers to clarifying questions and triggers provider search. This endpoint:
+
+1. Retrieves the job from in-memory storage using `job_id`
+2. Merges clarification answers into the job object
+3. Builds a search prompt from the complete job context
+4. Calls Grok Fast Search to find relevant service providers
+5. Saves providers to Supabase database with normalized data
+6. Returns the updated job object and list of matched providers
+
+## Request Body
+
+<ParamField body="job_id" type="string" required>
+  The job ID returned from the `/api/start-job` endpoint.
+  
+  **Example:** `"550e8400-e29b-41d4-a716-446655440000"`
+</ParamField>
+
+<ParamField body="answers" type="object" required>
+  Dictionary mapping question IDs to user's answers. Keys should match the question `id` values from the start-job response.
+  
+  **Example:**
+  ```json
+  {
+    "q1": "The toilet is constantly running",
+    "q2": "Yes, water runs non-stop",
+    "q3": "About 10 years old",
+    "q4": "No water damage visible",
+    "q5": "Not an emergency, can wait a day"
+  }
+  ```
+</ParamField>
+
+## Response
+
+<ResponseField name="job" type="object">
+  The complete job object with all details and updated status.
+  
+  <Expandable title="Job object fields">
+    <ResponseField name="id" type="string">
+      The job's unique identifier.
+    </ResponseField>
+    
+    <ResponseField name="original_query" type="string">
+      The user's original service request query.
+    </ResponseField>
+    
+    <ResponseField name="task" type="string">
+      The inferred task/service type (e.g., "plumber").
+    </ResponseField>
+    
+    <ResponseField name="house_address" type="string">
+      Full service location address.
+    </ResponseField>
+    
+    <ResponseField name="zip_code" type="string">
+      ZIP code for the service location.
+    </ResponseField>
+    
+    <ResponseField name="date_needed" type="string">
+      When the service is needed.
+    </ResponseField>
+    
+    <ResponseField name="price_limit" type="number | string">
+      Maximum price or "no_limit".
+    </ResponseField>
+    
+    <ResponseField name="clarifications" type="object">
+      Dictionary of question IDs to user answers.
+    </ResponseField>
+    
+    <ResponseField name="questions" type="array">
+      Array of ClarifyingQuestion objects from start-job.
+    </ResponseField>
+    
+    <ResponseField name="status" type="string">
+      Job status. Will be `"searched"` after successful completion.
+      
+      **Possible values:** `"collecting_info"`, `"ready_for_search"`, `"searched"`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="providers" type="array">
+  Array of matched service providers found via Grok Fast Search.
+  
+  <Expandable title="Provider object">
+    <ResponseField name="id" type="integer">
+      Database ID of the provider record.
+    </ResponseField>
+    
+    <ResponseField name="job_id" type="string">
+      The job ID this provider is associated with.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Service provider's business name.
+      
+      **Example:** `"Reliable Plumbing Services"`
+    </ResponseField>
+    
+    <ResponseField name="phone" type="string">
+      Provider's phone number.
+      
+      **Example:** `"(408) 555-0101"`
+    </ResponseField>
+    
+    <ResponseField name="estimated_price" type="number | null">
+      Estimated price for the service (may be null initially).
+    </ResponseField>
+    
+    <ResponseField name="negotiated_price" type="number | null">
+      Final negotiated price after call (null until negotiation completes).
+    </ResponseField>
+    
+    <ResponseField name="call_status" type="string">
+      Status of the automated call to this provider.
+      
+      **Default:** `"pending"`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example Request
+
+```bash
+curl -X POST http://localhost:8000/api/complete-job \
+  -H "Content-Type: application/json" \
+  -d '{
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "answers": {
+      "q1": "The toilet is constantly running",
+      "q2": "Yes, water runs non-stop",
+      "q3": "About 10 years old",
+      "q4": "No water damage visible",
+      "q5": "Not an emergency, can wait a day"
+    }
+  }'
+```
+
+## Example Response
+
+```json
+{
+  "job": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "original_query": "fix my toilet",
+    "task": "plumber",
+    "house_address": "123 Main St, San Jose, CA 95126",
+    "zip_code": "95126",
+    "date_needed": "2025-12-10",
+    "price_limit": 250,
+    "clarifications": {
+      "q1": "The toilet is constantly running",
+      "q2": "Yes, water runs non-stop"
+    },
+    "questions": [
+      {
+        "id": "q1",
+        "question": "What is the specific issue with your toilet?"
+      },
+      {
+        "id": "q2",
+        "question": "Is the toilet running constantly or leaking?"
+      }
+    ],
+    "status": "searched"
+  },
+  "providers": [
+    {
+      "id": 1,
+      "job_id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Reliable Plumbing Services",
+      "phone": "(408) 555-0101",
+      "estimated_price": 150.0,
+      "negotiated_price": null,
+      "call_status": "pending"
+    },
+    {
+      "id": 2,
+      "job_id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Bay Area Plumbers",
+      "phone": "(408) 555-5678",
+      "estimated_price": 200.0,
+      "negotiated_price": null,
+      "call_status": "pending"
+    }
+  ]
+}
+```
+
+## Error Responses
+
+<ResponseExample>
+```json 404 - Job Not Found
+{
+  "detail": "Job not found: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json 500 - Search Error
+{
+  "detail": "Error completing job: Grok Fast Search API unavailable"
+}
+```
+</ResponseExample>
+
+## Implementation Details
+
+### Provider Search Process
+
+1. **Context Formatting**: Answers are formatted into a natural paragraph for context
+2. **Problem Statement**: Grok LLM generates a formatted problem statement from the query and task
+3. **Search Query**: Complete job context (task, location, answers) is sent to Grok Fast Search
+4. **Provider Normalization**: Search results are parsed and normalized into provider records
+5. **Database Storage**: Each provider is saved to Supabase with:
+   - Job ID and provider details (name, phone)
+   - Context answers paragraph
+   - Problem statement
+   - Location data (address, ZIP)
+   - Price constraints
+   - Initial call status ("pending")
+
+### Data Persistence
+
+- **Job**: Updated in-memory only (status changes to `"searched"`)
+- **Providers**: Persisted to Supabase database for tracking throughout the negotiation process
+
+### Next Steps
+
+After receiving providers, you can:
+
+1. Use [POST /api/start-calls/{job_id}](/api/providers#start-calls) to initiate automated calls
+2. Poll [GET /api/providers/{job_id}/status](/api/providers#get-provider-status) to track call progress and negotiated prices

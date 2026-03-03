@@ -1,0 +1,107 @@
+---
+title: 'API Overview'
+description: 'REST API for the Haggle Service Marketplace'
+---
+
+## Base URL
+
+The Haggle API is a RESTful API built with FastAPI that enables service provider discovery using Grok LLM and Grok Fast Search.
+
+```
+http://localhost:8000
+```
+
+## Authentication
+
+Currently, the API does not require authentication. This is a Phase 1 implementation.
+
+## API Workflow
+
+The Haggle API follows a two-step workflow:
+
+1. **Start Job** - Submit a service request and receive clarifying questions
+2. **Complete Job** - Submit answers and receive matched service providers
+
+### Step 1: Start Job
+
+```bash
+curl -X POST http://localhost:8000/api/start-job \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "fix my toilet",
+    "house_address": "123 Main St, San Jose, CA 95126",
+    "zip_code": "95126",
+    "price_limit": 250,
+    "date_needed": "2025-12-10"
+  }'
+```
+
+Returns a `job_id`, inferred `task` type, and clarifying `questions`.
+
+### Step 2: Complete Job
+
+```bash
+curl -X POST http://localhost:8000/api/complete-job \
+  -H "Content-Type: application/json" \
+  -d '{
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "answers": {
+      "q1": "The toilet is constantly running",
+      "q2": "Yes, water runs non-stop"
+    }
+  }'
+```
+
+Returns the complete job object and a list of matched service providers.
+
+## Core Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Start Job" icon="play" href="/api/start-job">
+    Create a new job and get clarifying questions
+  </Card>
+  <Card title="Complete Job" icon="check" href="/api/complete-job">
+    Submit answers and find providers
+  </Card>
+  <Card title="Provider Endpoints" icon="users" href="/api/providers">
+    List and retrieve provider information
+  </Card>
+  <Card title="Health Check" icon="heart-pulse">
+    GET /api/health - Check API status
+  </Card>
+</CardGroup>
+
+## Response Format
+
+All API responses return JSON. Successful responses return the appropriate data structure, while errors return:
+
+```json
+{
+  "detail": "Error message description"
+}
+```
+
+## HTTP Status Codes
+
+| Code | Description |
+|------|-------------|
+| 200  | Success |
+| 404  | Resource not found (job_id or providers) |
+| 500  | Internal server error |
+| 503  | Service unavailable (call backend unreachable) |
+
+## Data Storage
+
+- **Jobs**: Stored in-memory (not persisted to database). In production, use Redis or similar for session storage.
+- **Providers**: Persisted to Supabase database for tracking negotiations and call status.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Start Job" href="/api/start-job">
+    Learn how to create a new service request
+  </Card>
+  <Card title="Complete Job" href="/api/complete-job">
+    Learn how to complete a job with answers
+  </Card>
+</CardGroup>

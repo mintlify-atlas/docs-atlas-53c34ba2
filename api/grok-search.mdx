@@ -1,0 +1,426 @@
+---
+title: Grok Search Service
+description: Web search integration for finding local service providers using OpenAI
+---
+
+## Overview
+
+The Grok Search service (despite its name, it uses OpenAI's web search tool) finds local service providers based on job requirements. It searches the web for businesses near the user's location and returns structured provider data with names and phone numbers.
+
+**Source**: `services/grok_search.py`
+
+<Note>
+This service is named "grok_search" but actually uses OpenAI's Responses API with the `web_search_preview` tool, not xAI's Grok.
+</Note>
+
+## API Functions
+
+### search_providers()
+
+Searches for service providers using OpenAI's web search tool.
+
+<ParamField path="job" type="Job" required>
+  Complete Job object containing all job details. Required fields:
+  - `id`: Job ID for associating providers
+  - `task`: Service type (e.g., "plumber", "electrician")
+  - `zip_code`: Location to search near
+  - Other job metadata (problem, context_answers, etc.)
+</ParamField>
+
+<ResponseField name="providers" type="List[ProviderCreate]">
+  List of provider objects, each containing:
+  - `job_id`: The job ID this provider is associated with
+  - `name`: Business name
+  - `phone`: Phone number in various formats
+  
+  Returns up to `MAX_PROVIDERS` (default: 5) providers.
+</ResponseField>
+
+```python
+from services.grok_search import search_providers
+from schemas import Job
+
+# Create job object
+job = Job(
+    id="job_123",
+    task="plumber",
+    zip_code="94102",
+    problem="your toilet is leaking",
+    date_needed="2024-03-20",
+    max_price=200.0,
+    context_answers=""
+)
+
+# Search for providers
+providers = await search_providers(job)
+
+for provider in providers:
+    print(f"{provider.name}: {provider.phone}")
+
+# Output:
+# Reliable Plumbing Services: (408) 555-0101
+# Quick Drain Solutions: (408) 555-0102
+# Bay Area Master Plumbers: (408) 555-0103
+```
+
+**How It Works:**
+
+1. Constructs search prompt using `build_search_prompt()`
+2. Calls OpenAI Responses API with `web_search_preview` tool
+3. Receives web search results as text
+4. Parses provider data using `parse_provider_response()`
+5. Returns structured provider objects
+6. Falls back to mock data if API unavailable
+
+---
+
+### build_search_prompt()
+
+Constructs the search query string from job details.
+
+<ParamField path="job" type="Job" required>
+  Job object with task and zip_code fields
+</ParamField>
+
+<ResponseField name="prompt" type="str">
+  Formatted search prompt string optimized for web search
+</ResponseField>
+
+```python
+from services.grok_search import build_search_prompt
+from schemas import Job
+
+job = Job(
+    id="job_123",
+    task="electrician",
+    zip_code="10001",
+    # ... other fields
+)
+
+prompt = build_search_prompt(job)
+print(prompt)
+
+# Output:
+# Find electrician services near zip code 10001.
+# 
+# Search the web for local electricians and provide a list with:
+# 1. Business name
+# 2. Phone number
+# 
+# Format each result as: NAME | PHONE
+# 
+# Find up to 5 providers near 10001.
+```
+
+**Prompt Format:**
+The prompt explicitly requests:
+- Service type and location
+- Business name and phone number only
+- `NAME | PHONE` formatting
+- Maximum number of results (controlled by `MAX_PROVIDERS` config)
+
+---
+
+### parse_provider_response()
+
+Parses web search response text into structured provider objects.
+
+<ParamField path="content" type="str" required>
+  Raw response content from OpenAI web search
+</ParamField>
+
+<ParamField path="job_id" type="str" required>
+  Job ID to associate with parsed providers
+</ParamField>
+
+<ResponseField name="providers" type="List[ProviderCreate]">
+  Parsed provider objects with name and phone
+</ResponseField>
+
+```python
+from services.grok_search import parse_provider_response
+
+response_text = """
+1. Reliable Plumbing Services | (408) 555-0101
+2. Quick Drain Solutions | (408) 555-0102
+3. **Bay Area Plumbers** | 408-555-0103
+"""
+
+providers = parse_provider_response(response_text, "job_123")
+
+for p in providers:
+    print(f"{p.name}: {p.phone}")
+
+# Output:
+# Reliable Plumbing Services: (408) 555-0101
+# Quick Drain Solutions: (408) 555-0102
+# Bay Area Plumbers: 408-555-0103
+```
+
+**Parsing Logic:**
+
+1. **Phone Number Detection**: Uses regex to find phone numbers in multiple formats
+   - `(xxx) xxx-xxxx`
+   - `xxx-xxx-xxxx`
+   - `xxx.xxx.xxxx`
+   - `xxxxxxxxxx`
+
+2. **Name Extraction**: Extracts business name before the phone number
+
+3. **Cleanup Operations**:
+   - Removes numbered prefixes ("1.", "1)", "1:")
+   - Removes markdown formatting (asterisks)
+   - Removes leading/trailing separators (dash, pipe, colon)
+   - Skips header lines and too-short names
+
+4. **Validation**:
+   - Name must be at least 3 characters
+   - Line must contain a valid phone number
+   - Skips generic header words ("name", "business", "provider")
+
+**Supported Formats:**
+```
+NAME | PHONE
+NAME - PHONE
+**NAME** | PHONE
+1. NAME | PHONE
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+<ParamField path="OPENAI_API_KEY" type="str" required>
+  Your OpenAI API key for accessing web search
+</ParamField>
+
+<ParamField path="OPENAI_ORG_API_KEY" type="str" optional>
+  OpenAI organization key (if applicable)
+</ParamField>
+
+<ParamField path="MAX_PROVIDERS" type="int" optional>
+  Maximum number of providers to return (default: 5)
+</ParamField>
+
+```bash
+# .env file
+OPENAI_API_KEY=sk-proj-...
+OPENAI_ORG_API_KEY=org-...
+MAX_PROVIDERS=5
+```
+
+### Thread Pool Configuration
+
+The service uses a thread pool to avoid blocking the async event loop:
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+
+_executor = ThreadPoolExecutor(max_workers=2)
+
+# Usage in search_providers()
+loop = asyncio.get_event_loop()
+return await loop.run_in_executor(_executor, _sync_search_providers, job)
+```
+
+**Why ThreadPoolExecutor?**
+OpenAI's SDK is synchronous, so we run it in a thread pool to prevent blocking the main async event loop during web searches.
+
+---
+
+## Implementation Details
+
+### OpenAI Web Search Call
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key=OPENAI_API_KEY, organization=OPENAI_ORG_API_KEY)
+
+response = client.responses.create(
+    model="gpt-4o",
+    tools=[{"type": "web_search_preview"}],
+    input=search_prompt,
+)
+
+full_response = response.output_text
+```
+
+**Model**: `gpt-4o`  
+**Tool**: `web_search_preview` (searches the web and returns formatted results)  
+**Output**: Text response with provider names and phone numbers
+
+---
+
+## Fallback Providers
+
+When the API is unavailable or returns no results, the service provides realistic mock data:
+
+```python
+from services.grok_search import _fallback_providers
+from schemas import Job
+
+job = Job(
+    id="job_123",
+    task="plumber",
+    zip_code="94102",
+    # ... other fields
+)
+
+providers = _fallback_providers(job)
+# Returns task-specific mock providers
+```
+
+**Mock Provider Categories:**
+- **Plumber**: Reliable Plumbing Services, Quick Drain Solutions, Bay Area Master Plumbers, etc.
+- **Electrician**: Bright Spark Electric, Safe Home Electrical, PowerUp Electricians, etc.
+- **House Cleaner**: Sparkle Clean Services, Maid Perfect, Home Fresh Cleaning, etc.
+- **Painter**: Pro Coat Painters, Fresh Paint Co., Color Masters Painting, etc.
+- **Default**: Generic handyman/service providers for unlisted tasks
+
+Each fallback provider includes:
+- Realistic business name
+- Phone number in `(408) 555-XXXX` format
+- Mock estimated price (not used in current implementation)
+
+---
+
+## Error Handling
+
+The service gracefully handles all API errors:
+
+```python
+try:
+    client = OpenAI(api_key=OPENAI_API_KEY, organization=OPENAI_ORG_API_KEY)
+    response = client.responses.create(
+        model="gpt-4o",
+        tools=[{"type": "web_search_preview"}],
+        input=search_prompt,
+    )
+    # Parse and return providers
+except Exception as e:
+    print(f"OpenAI Search API exception: {e}")
+    return _fallback_providers(job)
+```
+
+**Error Scenarios:**
+- Missing API key → Returns fallback providers
+- Network error → Returns fallback providers
+- Rate limiting → Returns fallback providers
+- Parse failure → Returns fallback providers
+- Empty results → Returns fallback providers
+
+---
+
+## Phone Number Regex
+
+The service uses a comprehensive phone number pattern:
+
+```python
+import re
+
+phone_pattern = re.compile(r'\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}')
+```
+
+**Matches:**
+- `(408) 555-0101`
+- `408-555-0101`
+- `408.555.0101`
+- `408 555 0101`
+- `4085550101`
+
+**Doesn't Match:**
+- International formats
+- Extensions
+- Incomplete numbers
+
+---
+
+## Integration Example
+
+Complete workflow from job creation to provider search:
+
+```python
+import asyncio
+from services.grok_search import search_providers
+from schemas import Job
+
+async def find_providers_for_job():
+    # Create job from user input
+    job = Job(
+        id="job_456",
+        task="HVAC technician",
+        zip_code="90210",
+        problem="your AC is not cooling",
+        date_needed="2024-03-25",
+        max_price=350.0,
+        context_answers="2-story house, 10 year old unit"
+    )
+    
+    # Search for providers
+    print(f"Searching for {job.task}s near {job.zip_code}...")
+    providers = await search_providers(job)
+    
+    # Display results
+    print(f"\nFound {len(providers)} providers:")
+    for i, provider in enumerate(providers, 1):
+        print(f"{i}. {provider.name}")
+        print(f"   Phone: {provider.phone}")
+        print(f"   Job ID: {provider.job_id}")
+        print()
+    
+    return providers
+
+# Run the search
+if __name__ == "__main__":
+    providers = asyncio.run(find_providers_for_job())
+```
+
+**Expected Output:**
+```
+Searching for HVAC technicians near 90210...
+
+Found 5 providers:
+1. Cool Air HVAC Services
+   Phone: (310) 555-0201
+   Job ID: job_456
+
+2. Beverly Hills Heating & Cooling
+   Phone: (310) 555-0202
+   Job ID: job_456
+
+...
+```
+
+---
+
+## Performance Considerations
+
+**Async Handling:**
+```python
+# The service runs synchronous OpenAI calls in a thread pool
+_executor = ThreadPoolExecutor(max_workers=2)
+
+# This prevents blocking the main async loop
+await loop.run_in_executor(_executor, _sync_search_providers, job)
+```
+
+**Rate Limiting:**
+- Limited to 2 concurrent searches (thread pool size)
+- No built-in retry logic (fails to fallback)
+- Consider implementing rate limiting if calling frequently
+
+**Response Time:**
+- Web search: 3-8 seconds typical
+- Fallback: < 100ms
+- Parsing: < 10ms
+
+---
+
+## See Also
+
+- [Grok LLM Service](/api/grok-llm) - Task inference and question generation
+- [Voice Agent](/api/voice-agent) - Automated calling to providers
+- [OpenAI Web Search Docs](https://platform.openai.com/docs/guides/tools-web-search) - Official API documentation

@@ -1,0 +1,230 @@
+---
+title: Configuration
+description: Configure environment variables and API keys for Haggle
+---
+
+## Environment Variables
+
+Haggle uses environment variables for configuration. Create a `config.py` file in the project root or use `.env` files.
+
+<Note>
+  The `config.py` file is gitignored for security. You'll need to create it manually with your credentials.
+</Note>
+
+## Backend Configuration
+
+### Creating config.py
+
+Create a `config.py` file in the root directory:
+
+```python config.py
+"""Configuration for Haggle Service Marketplace."""
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# xAI API Configuration
+XAI_API_KEY = os.getenv("XAI_API_KEY", "your-xai-api-key-here")
+
+# Supabase Configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://your-project.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "your-supabase-anon-key")
+
+# Provider Search Configuration
+MAX_PROVIDERS = int(os.getenv("MAX_PROVIDERS", "5"))
+
+# Optional: Backend Service URL (for voice calling feature)
+CALL_BACKEND_URL = os.getenv("CALL_BACKEND_URL", "http://localhost:6000")
+```
+
+### Alternative: Using .env File
+
+You can also create a `.env` file in the project root:
+
+```bash .env
+# xAI API Key (required for Grok LLM)
+XAI_API_KEY=your-xai-api-key-here
+
+# Supabase Configuration (required)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-supabase-anon-key
+
+# Optional: Maximum providers to return
+MAX_PROVIDERS=5
+
+# Optional: Call backend service URL
+CALL_BACKEND_URL=http://localhost:6000
+```
+
+<Warning>
+  Never commit `.env` or `config.py` files to version control. Both are included in `.gitignore` by default.
+</Warning>
+
+## Required API Keys
+
+<Steps>
+  <Step title="Get xAI API Key">
+    Haggle uses Grok LLM for task inference and question generation.
+    
+    1. Visit [x.ai](https://x.ai) and sign up for an account
+    2. Navigate to the API section
+    3. Generate a new API key
+    4. Copy the key to your `config.py` or `.env` file
+    
+    <Info>
+      If no `XAI_API_KEY` is provided, Haggle will use fallback logic (rule-based task inference and default questions).
+    </Info>
+  </Step>
+
+  <Step title="Get Supabase Credentials">
+    Supabase provides your PostgreSQL database.
+    
+    1. Go to your [Supabase Dashboard](https://supabase.com/dashboard)
+    2. Select your project
+    3. Navigate to **Settings** → **API**
+    4. Copy the following:
+       - **Project URL** → `SUPABASE_URL`
+       - **anon public** key → `SUPABASE_KEY`
+    
+    <Note>
+      Use the `anon` key for development. For production, consider using the `service_role` key with proper security measures.
+    </Note>
+  </Step>
+
+  <Step title="Optional: Twilio Configuration (Voice Calling)">
+    For the voice calling feature (backend/app.py), additional environment variables are needed:
+    
+    ```bash .env
+    # Twilio Configuration
+    TWILIO_ACCOUNT_SID=your-twilio-account-sid
+    TWILIO_AUTH_TOKEN=your-twilio-auth-token
+    TWILIO_PHONE_NUMBER=+1234567890
+    
+    # Domain for TwiML callbacks
+    DOMAIN=your-domain.com
+    ```
+    
+    <Warning>
+      Voice calling is an advanced feature requiring Twilio setup and a public domain for webhooks.
+    </Warning>
+  </Step>
+</Steps>
+
+## Configuration Reference
+
+### Core Settings
+
+<ParamField path="XAI_API_KEY" type="string" required>
+  API key for xAI's Grok LLM. Used for:
+  - Task inference from user queries
+  - Generating clarifying questions
+  - Formatting problem statements
+  - Extracting negotiated prices from call transcripts
+  
+  **Fallback:** If not provided, uses rule-based logic
+</ParamField>
+
+<ParamField path="SUPABASE_URL" type="string" required>
+  Your Supabase project URL (format: `https://[project-id].supabase.co`)
+  
+  **Example:** `https://podtjfttutrybvotsduh.supabase.co`
+</ParamField>
+
+<ParamField path="SUPABASE_KEY" type="string" required>
+  Supabase anon/public API key for database operations
+  
+  **Location:** Dashboard → Settings → API → anon public
+</ParamField>
+
+### Optional Settings
+
+<ParamField path="MAX_PROVIDERS" type="integer" default="5">
+  Maximum number of service providers to return from search
+  
+  **Range:** 1-20 recommended
+</ParamField>
+
+<ParamField path="CALL_BACKEND_URL" type="string" default="http://localhost:6000">
+  URL of the voice calling backend service
+  
+  **Used by:** `/api/start-calls/{job_id}` endpoint in main.py:381
+</ParamField>
+
+### Voice Calling Configuration
+
+<ParamField path="TWILIO_ACCOUNT_SID" type="string">
+  Twilio account identifier for voice calling
+</ParamField>
+
+<ParamField path="TWILIO_AUTH_TOKEN" type="string">
+  Twilio authentication token
+</ParamField>
+
+<ParamField path="TWILIO_PHONE_NUMBER" type="string">
+  Your Twilio phone number (E.164 format: +1234567890)
+</ParamField>
+
+<ParamField path="DOMAIN" type="string">
+  Public domain for TwiML webhooks (required for voice calling)
+  
+  **Example:** `your-app.ngrok.io` or `api.yourdomain.com`
+</ParamField>
+
+## Database Schema
+
+The `providers` table stores service provider information:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGSERIAL | Primary key |
+| `service_provider` | TEXT | Provider name (NOT NULL) |
+| `phone_number` | TEXT | Contact phone |
+| `context_answers` | TEXT | Formatted Q&A paragraph |
+| `house_address` | TEXT | Full customer address |
+| `zip_code` | TEXT | ZIP code for location |
+| `max_price` | NUMERIC(10,2) | Customer's budget |
+| `job_id` | TEXT | Associated job ID (NOT NULL) |
+| `minimum_quote` | NUMERIC(10,2) | Initial quote |
+| `problem` | TEXT | Problem statement |
+| `negotiated_price` | NUMERIC(10,2) | Final agreed price |
+| `call_status` | TEXT | Status: pending/in_progress/completed/failed |
+| `call_transcript` | TEXT | Full call transcript |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+
+## Verifying Configuration
+
+Test your configuration with the CLI demo:
+
+```bash
+python cli.py --demo
+```
+
+Successful output indicates:
+- ✅ Supabase connection established
+- ✅ Grok LLM API working (or fallback active)
+- ✅ Database schema correct
+
+<Check>
+  You should see output like:
+  ```
+  ✅ Database initialized
+  🧠 STEP 2: Analyzing your request...
+  ✓ Task identified: plumber
+  ✓ Generated questions:
+  ...
+  ✓ Found 5 providers!
+  ✓ Saved 5 providers to Supabase
+  ```
+</Check>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Running Locally" icon="play" href="/guides/running-locally">
+    Start the development servers
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the API endpoints
+  </Card>
+</CardGroup>

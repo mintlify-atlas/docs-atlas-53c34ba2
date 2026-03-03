@@ -1,0 +1,358 @@
+---
+title: 'Provider Endpoints'
+description: 'Retrieve and manage service provider information'
+---
+
+## Overview
+
+Provider endpoints allow you to retrieve service provider information, monitor call status, and trigger automated negotiation calls.
+
+## List All Providers
+
+```
+GET /api/providers
+```
+
+Retrieves all providers in the database across all jobs. Primarily used for debugging.
+
+### Response
+
+Returns an array of provider objects:
+
+<ResponseField name="providers" type="array">
+  <Expandable title="Provider object">
+    <ResponseField name="id" type="integer">
+      Database ID of the provider.
+    </ResponseField>
+    
+    <ResponseField name="job_id" type="string">
+      Associated job ID.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Provider's business name.
+    </ResponseField>
+    
+    <ResponseField name="phone" type="string">
+      Provider's phone number.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8000/api/providers
+```
+
+### Example Response
+
+```json
+[
+  {
+    "id": 1,
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Mike's Plumbing Services",
+    "phone": "(408) 555-1234"
+  },
+  {
+    "id": 2,
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Bay Area Plumbers",
+    "phone": "(408) 555-5678"
+  }
+]
+```
+
+---
+
+## Get Providers by Job
+
+```
+GET /api/providers/{job_id}
+```
+
+Retrieves all providers associated with a specific job.
+
+### Path Parameters
+
+<ParamField path="job_id" type="string" required>
+  The job ID to retrieve providers for.
+</ParamField>
+
+### Response
+
+<ResponseField name="providers" type="array">
+  <Expandable title="Provider object">
+    <ResponseField name="id" type="integer">
+      Database ID.
+    </ResponseField>
+    
+    <ResponseField name="job_id" type="string">
+      The job ID.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Provider's business name.
+    </ResponseField>
+    
+    <ResponseField name="phone" type="string">
+      Phone number.
+    </ResponseField>
+    
+    <ResponseField name="estimated_price" type="number | null">
+      Estimated service price.
+    </ResponseField>
+    
+    <ResponseField name="negotiated_price" type="number | null">
+      Final negotiated price (null until call completes).
+    </ResponseField>
+    
+    <ResponseField name="call_status" type="string">
+      Current call status.
+      
+      **Default:** `"pending"`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8000/api/providers/550e8400-e29b-41d4-a716-446655440000
+```
+
+### Example Response
+
+```json
+[
+  {
+    "id": 1,
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Reliable Plumbing Services",
+    "phone": "(408) 555-0101",
+    "estimated_price": 150.0,
+    "negotiated_price": 135.0,
+    "call_status": "completed"
+  },
+  {
+    "id": 2,
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Bay Area Plumbers",
+    "phone": "(408) 555-5678",
+    "estimated_price": 200.0,
+    "negotiated_price": null,
+    "call_status": "pending"
+  }
+]
+```
+
+---
+
+## Get Provider Status
+
+```
+GET /api/providers/{job_id}/status
+```
+
+Retrieves provider information with call status and negotiated prices. **Optimized for frontend polling** to track negotiation progress.
+
+### Path Parameters
+
+<ParamField path="job_id" type="string" required>
+  The job ID to retrieve provider status for.
+</ParamField>
+
+### Response
+
+<ResponseField name="providers" type="array">
+  <Expandable title="Provider status object">
+    <ResponseField name="id" type="integer">
+      Database ID.
+    </ResponseField>
+    
+    <ResponseField name="job_id" type="string">
+      The job ID.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Provider's business name.
+    </ResponseField>
+    
+    <ResponseField name="phone" type="string">
+      Phone number.
+    </ResponseField>
+    
+    <ResponseField name="estimated_price" type="number | null">
+      Initial estimated price.
+    </ResponseField>
+    
+    <ResponseField name="negotiated_price" type="number | null">
+      Final negotiated price after call.
+    </ResponseField>
+    
+    <ResponseField name="call_status" type="string">
+      Current status of the automated call.
+      
+      **Possible values:** `"pending"`, `"in_progress"`, `"completed"`, `"failed"`
+    </ResponseField>
+    
+    <ResponseField name="call_transcript" type="string | null">
+      Full transcript of the negotiation call (if available).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8000/api/providers/550e8400-e29b-41d4-a716-446655440000/status
+```
+
+### Example Response
+
+```json
+[
+  {
+    "id": 1,
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Reliable Plumbing Services",
+    "phone": "(408) 555-0101",
+    "estimated_price": 150.0,
+    "negotiated_price": 135.0,
+    "call_status": "completed",
+    "call_transcript": "Agent: Hello, this is regarding a plumbing job...\nProvider: Yes, I can help with that...\n..."
+  },
+  {
+    "id": 2,
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Bay Area Plumbers",
+    "phone": "(408) 555-5678",
+    "estimated_price": 200.0,
+    "negotiated_price": null,
+    "call_status": "in_progress",
+    "call_transcript": null
+  }
+]
+```
+
+### Usage Pattern
+
+This endpoint is designed for polling:
+
+```javascript
+// Poll every 5 seconds for updates
+const pollStatus = async (jobId) => {
+  const response = await fetch(
+    `http://localhost:8000/api/providers/${jobId}/status`
+  );
+  const providers = await response.json();
+  
+  // Check if all calls are complete
+  const allComplete = providers.every(
+    p => p.call_status === 'completed' || p.call_status === 'failed'
+  );
+  
+  if (!allComplete) {
+    setTimeout(() => pollStatus(jobId), 5000);
+  }
+};
+```
+
+---
+
+## Start Calls
+
+```
+POST /api/start-calls/{job_id}
+```
+
+Triggers automated negotiation calls for all providers associated with a job. Calls the backend service (runs on port 6000) to initiate the voice agent calls.
+
+### Path Parameters
+
+<ParamField path="job_id" type="string" required>
+  The job ID to start calls for.
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string">
+  Status of the call initiation.
+  
+  **Value:** `"started"`
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable message about the operation.
+</ResponseField>
+
+<ResponseField name="provider_count" type="integer">
+  Number of providers that calls were initiated for.
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8000/api/start-calls/550e8400-e29b-41d4-a716-446655440000
+```
+
+### Example Response
+
+```json
+{
+  "status": "started",
+  "message": "Started calls for 3 providers",
+  "provider_count": 3
+}
+```
+
+### Error Responses
+
+<ResponseExample>
+```json 404 - Job Not Found
+{
+  "detail": "Job not found: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json 404 - No Providers
+{
+  "detail": "No providers found for job: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json 503 - Service Unavailable
+{
+  "detail": "Call backend service unavailable: Connection refused"
+}
+```
+</ResponseExample>
+
+### Configuration
+
+The call backend URL can be configured via environment variable:
+
+```bash
+CALL_BACKEND_URL=http://localhost:6000
+```
+
+**Default:** `http://localhost:6000`
+
+### Implementation Details
+
+This endpoint:
+1. Verifies the job exists in memory
+2. Verifies providers exist in the database for this job
+3. Makes an HTTP POST request to `{CALL_BACKEND_URL}/start-job/{job_id}`
+4. Returns success status and provider count
+
+The backend service handles:
+- Initiating voice agent calls to each provider
+- Conducting automated negotiation
+- Updating provider records with negotiated prices and call status
+- Storing call transcripts

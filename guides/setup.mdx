@@ -1,0 +1,209 @@
+---
+title: Setup and Installation
+description: Complete guide to setting up Haggle on your local machine
+---
+
+## Prerequisites
+
+Before installing Haggle, ensure you have the following:
+
+<CardGroup cols={2}>
+  <Card title="Python 3.x" icon="python">
+    Required for the backend API service
+  </Card>
+  <Card title="Node.js & npm" icon="node">
+    Required for the Next.js frontend (v16.0.7+)
+  </Card>
+  <Card title="Supabase Account" icon="database">
+    For PostgreSQL database hosting
+  </Card>
+  <Card title="API Keys" icon="key">
+    xAI API key for Grok LLM
+  </Card>
+</CardGroup>
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Haggle repository to your local machine:
+    
+    ```bash
+    git clone <repository-url>
+    cd haggle
+    ```
+  </Step>
+
+  <Step title="Install Backend Dependencies">
+    Install Python dependencies using pip:
+    
+    <CodeGroup>
+    ```bash pip
+    pip install -r requirements.txt
+    ```
+    
+    ```bash pip3
+    pip3 install -r requirements.txt
+    ```
+    
+    ```bash venv
+    # Create virtual environment (recommended)
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    pip install -r requirements.txt
+    ```
+    </CodeGroup>
+    
+    This installs the following key dependencies:
+    - **FastAPI** (v0.115.0+) - Web framework
+    - **Uvicorn** (v0.30.0+) - ASGI server
+    - **Supabase** (v2.0.0+) - Database client
+    - **xAI SDK** (v0.1.0+) - Grok LLM integration
+    - **httpx** (v0.27.0+) - Async HTTP client
+    - **Rich** (v13.0.0+) - CLI interface
+  </Step>
+
+  <Step title="Install Frontend Dependencies">
+    Navigate to the frontend directory and install Node.js dependencies:
+    
+    <CodeGroup>
+    ```bash npm
+    cd frontend
+    npm install
+    ```
+    
+    ```bash yarn
+    cd frontend
+    yarn install
+    ```
+    
+    ```bash pnpm
+    cd frontend
+    pnpm install
+    ```
+    
+    ```bash bun
+    cd frontend
+    bun install
+    ```
+    </CodeGroup>
+    
+    The frontend uses:
+    - **Next.js** (v16.0.7) - React framework
+    - **React** (v19.2.0) - UI library
+    - **Tailwind CSS** (v4.1.9) - Styling
+    - **Radix UI** - Component primitives
+  </Step>
+
+  <Step title="Set Up Supabase Database">
+    Create the required database table in Supabase:
+    
+    1. Go to your [Supabase Dashboard](https://supabase.com/dashboard)
+    2. Select your project
+    3. Navigate to **SQL Editor**
+    4. Copy the contents of `supabase_migration.sql` from the repository
+    5. Paste and click **Run**
+    
+    <Accordion title="View SQL Migration Script">
+    ```sql
+    CREATE TABLE IF NOT EXISTS providers (
+        id BIGSERIAL PRIMARY KEY,
+        service_provider TEXT NOT NULL,
+        phone_number TEXT,
+        context_answers TEXT,
+        house_address TEXT,
+        zip_code TEXT,
+        max_price NUMERIC(10, 2),
+        job_id TEXT NOT NULL,
+        minimum_quote NUMERIC(10, 2),
+        problem TEXT,
+        negotiated_price NUMERIC(10, 2),
+        call_status TEXT,
+        call_transcript TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    
+    -- Create indexes for better query performance
+    CREATE INDEX IF NOT EXISTS idx_providers_job_id ON providers(job_id);
+    CREATE INDEX IF NOT EXISTS idx_providers_zip_code ON providers(zip_code);
+    CREATE INDEX IF NOT EXISTS idx_providers_service_provider ON providers(service_provider);
+    CREATE INDEX IF NOT EXISTS idx_providers_house_address ON providers(house_address);
+    
+    -- Enable Row Level Security
+    ALTER TABLE providers ENABLE ROW LEVEL SECURITY;
+    
+    -- Development policy (adjust for production)
+    CREATE POLICY "Allow all operations for anon users" ON providers
+        FOR ALL
+        USING (true)
+        WITH CHECK (true);
+    ```
+    </Accordion>
+    
+    <Warning>
+      The migration includes a permissive RLS policy for development. Update security policies for production use.
+    </Warning>
+  </Step>
+
+  <Step title="Verify Installation">
+    Verify your installation by checking the database connection:
+    
+    ```bash
+    # From the project root
+    python cli.py --demo
+    ```
+    
+    This runs a demo workflow that tests:
+    - Database connectivity
+    - Grok LLM integration (or fallback mode)
+    - Provider search functionality
+    
+    <Check>
+      You should see output showing task inference, question generation, and provider search results.
+    </Check>
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Set up environment variables and API keys
+  </Card>
+  <Card title="Running Locally" icon="play" href="/guides/running-locally">
+    Start the development servers
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Missing columns error">
+    If you encounter errors about missing database columns:
+    
+    1. Verify the `providers` table exists in Supabase
+    2. Run the migration script from Step 4
+    3. Check that all column names match exactly (case-sensitive)
+    4. If you have an old table, use `supabase_migration_update.sql` instead
+  </Accordion>
+  
+  <Accordion title="Permission errors in Supabase">
+    If you get permission or RLS errors:
+    
+    1. Check Row Level Security policies in your Supabase dashboard
+    2. Ensure the development policy allows operations
+    3. Verify your `SUPABASE_KEY` is the anon/service_role key, not the project API key
+  </Accordion>
+  
+  <Accordion title="Python version issues">
+    Haggle requires Python 3.x. Check your version:
+    
+    ```bash
+    python --version
+    # or
+    python3 --version
+    ```
+    
+    If you have multiple Python versions, ensure you're using the correct one throughout.
+  </Accordion>
+</AccordionGroup>

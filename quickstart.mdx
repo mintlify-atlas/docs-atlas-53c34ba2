@@ -1,80 +1,309 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Get Haggle up and running in minutes
 ---
 
-## Get started in three steps
+## Get started with Haggle
 
-Get your documentation site running locally and make your first customization.
+This guide will get you from zero to running Haggle in under 10 minutes.
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+## Prerequisites
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Python 3.x" icon="python">
+    Required for backend service
+  </Card>
+  <Card title="Node.js 16+" icon="node-js">
+    Required for frontend (optional)
+  </Card>
+  <Card title="xAI API Key" icon="key">
+    Get from [xAI Console](https://console.x.ai/)
+  </Card>
+  <Card title="Supabase Account" icon="database">
+    Free tier available at [supabase.com](https://supabase.com)
+  </Card>
 </CardGroup>
 
+## Quick Start with CLI
+
+The fastest way to see Haggle in action is using the CLI demo mode:
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Step>
+
+  <Step title="Set up environment">
+    Create a `config.py` file with your API keys:
+    
+    ```python config.py
+    XAI_API_KEY = "your-xai-api-key"
+    OPENAI_API_KEY = "your-openai-api-key"
+    SUPABASE_URL = "your-supabase-url"
+    SUPABASE_KEY = "your-supabase-key"
+    MAX_PROVIDERS = 5
+    ```
+  </Step>
+
+  <Step title="Set up Supabase database">
+    Run this SQL in your Supabase SQL editor to create the providers table:
+    
+    ```sql
+    CREATE TABLE providers (
+      id BIGSERIAL PRIMARY KEY,
+      service_provider TEXT NOT NULL,
+      phone_number TEXT,
+      context_answers TEXT,
+      house_address TEXT,
+      zip_code TEXT,
+      max_price NUMERIC,
+      job_id TEXT,
+      minimum_quote NUMERIC,
+      negotiated_price NUMERIC,
+      call_status TEXT,
+      call_transcript TEXT,
+      problem TEXT,
+      raw_result JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    ```
+  </Step>
+
+  <Step title="Run the demo">
+    ```bash
+    python cli.py --demo
+    ```
+    
+    This will run through a complete demo workflow:
+    1. Submit a service request (e.g., "fix my leaky faucet")
+    2. AI infers the task type (plumber)
+    3. Generates clarifying questions
+    4. Searches for local providers
+    5. Saves results to database
+  </Step>
+</Steps>
+
+## Quick Start with API
+
+To run the full API server:
+
+<Steps>
+  <Step title="Start the backend">
+    ```bash
+    uvicorn main:app --reload --port 8000
+    ```
+    
+    The API will be available at `http://localhost:8000`
+  </Step>
+
+  <Step title="Test the API">
+    Create a new job:
+    
+    ```bash
+    curl -X POST http://localhost:8000/api/start-job \
+      -H "Content-Type: application/json" \
+      -d '{
+        "query": "fix my toilet",
+        "house_address": "123 Main St, San Jose, CA 95126",
+        "zip_code": "95126",
+        "price_limit": 250,
+        "date_needed": "2025-12-10"
+      }'
+    ```
+    
+    You'll receive a response with:
+    - `job_id` - Unique identifier for this job
+    - `task` - Inferred service type (e.g., "plumber")
+    - `questions` - Array of clarifying questions
+  </Step>
+
+  <Step title="Complete the job">
+    Submit answers to the clarifying questions:
+    
+    ```bash
+    curl -X POST http://localhost:8000/api/complete-job \
+      -H "Content-Type: application/json" \
+      -d '{
+        "job_id": "YOUR_JOB_ID",
+        "answers": {
+          "q1": "The toilet is constantly running",
+          "q2": "Standard toilet, about 10 years old",
+          "q3": "No water damage visible"
+        }
+      }'
+    ```
+    
+    This returns matched service providers from your area
+  </Step>
+</Steps>
+
+## Quick Start with Full Stack
+
+To run both frontend and backend:
+
+<Steps>
+  <Step title="Start the backend API">
+    ```bash
+    uvicorn main:app --reload --port 8000
+    ```
+  </Step>
+
+  <Step title="Start the frontend">
+    In a new terminal:
+    
+    ```bash
+    cd frontend
+    npm run dev
+    ```
+    
+    The frontend will be available at `http://localhost:3000`
+  </Step>
+
+  <Step title="Use the web interface">
+    1. Open `http://localhost:3000` in your browser
+    2. Enter a service request (e.g., "fix my leaky faucet")
+    3. Fill in your address, zip code, and budget
+    4. Answer the AI-generated clarifying questions
+    5. View matched providers with estimated prices
+  </Step>
+</Steps>
+
+## Enable Voice Calling (Optional)
+
+To enable automated voice negotiation with service providers:
+
+<Steps>
+  <Step title="Get Twilio credentials">
+    Sign up at [twilio.com](https://twilio.com) and get:
+    - Account SID
+    - Auth Token
+    - Phone Number
+  </Step>
+
+  <Step title="Add Twilio config">
+    Update your `config.py` or create a `.env` file:
+    
+    ```bash
+    TWILIO_ACCOUNT_SID=your_account_sid
+    TWILIO_AUTH_TOKEN=your_auth_token
+    TWILIO_PHONE_NUMBER=your_twilio_number
+    DOMAIN=your_public_domain  # e.g., ngrok URL
+    ```
+  </Step>
+
+  <Step title="Start the voice backend">
+    ```bash
+    cd backend
+    python app.py
+    ```
+    
+    This starts the voice agent service on port 6000
+  </Step>
+
+  <Step title="Trigger calls">
+    ```bash
+    curl -X POST http://localhost:8000/api/start-calls/{job_id}
+    ```
+    
+    The voice agent will call each provider and negotiate prices automatically
+  </Step>
+</Steps>
+
+## Verify Installation
+
+Check that everything is working:
+
+<AccordionGroup>
+  <Accordion title="Check API health">
+    ```bash
+    curl http://localhost:8000/api/health
+    ```
+    
+    Should return: `{"status": "healthy"}`
+  </Accordion>
+
+  <Accordion title="Test task inference">
+    ```bash
+    python -c "
+    import asyncio
+    from services.grok_llm import infer_task
+    
+    async def test():
+        task = await infer_task('fix my leaky faucet')
+        print(f'Inferred task: {task}')
+    
+    asyncio.run(test())
+    "
+    ```
+    
+    Should return something like: `Inferred task: plumber`
+  </Accordion>
+
+  <Accordion title="Check database connection">
+    ```bash
+    python -c "
+    from db.models import init_db, get_all_providers
+    init_db()
+    providers = get_all_providers()
+    print(f'Database connected. Provider count: {len(providers)}')
+    "
+    ```
+    
+    Should connect without errors
+  </Accordion>
+</AccordionGroup>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="How It Works" icon="diagram-project" href="/how-it-works">
+    Learn about the complete workflow from query to negotiation
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore all available API endpoints
+  </Card>
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Customize Haggle for your needs
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/platform/architecture">
+    Understand the system architecture
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="ImportError: No module named 'xai_sdk'">
+    Make sure you've installed all dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Accordion>
+
+  <Accordion title="Supabase connection error">
+    Verify your Supabase credentials in `config.py`:
+    - Check that SUPABASE_URL starts with `https://`
+    - Ensure SUPABASE_KEY is the anon/public key
+    - Verify the `providers` table exists
+  </Accordion>
+
+  <Accordion title="API key errors">
+    Ensure all required API keys are set:
+    - `XAI_API_KEY` - From [console.x.ai](https://console.x.ai/)
+    - `OPENAI_API_KEY` - From [platform.openai.com](https://platform.openai.com/)
+    - `SUPABASE_URL` and `SUPABASE_KEY` - From your Supabase project
+  </Accordion>
+
+  <Accordion title="Port already in use">
+    If port 8000 is already in use, specify a different port:
+    ```bash
+    uvicorn main:app --reload --port 8080
+    ```
+  </Accordion>
+</AccordionGroup>
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  **Need Help?** Check out the [setup guide](/guides/setup) for detailed installation instructions or open an issue on GitHub.
 </Note>

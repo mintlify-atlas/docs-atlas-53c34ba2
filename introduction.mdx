@@ -1,0 +1,273 @@
+---
+title: Introduction to Haggle
+description: AI-powered service marketplace that automatically finds providers and negotiates prices for you
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Haggle Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Haggle Hero Dark"
+/>
+
+## Welcome to Haggle
+
+Haggle is an **AI-powered service marketplace** that revolutionizes how you find and hire local service providers. Instead of manually calling multiple plumbers, electricians, or cleaners, Haggle does it all for you:
+
+1. **Understands your needs** using Grok LLM
+2. **Finds local providers** via intelligent web search
+3. **Calls providers automatically** using AI voice agents
+4. **Negotiates the best price** on your behalf
+
+<CardGroup cols={2}>
+  <Card
+    title="Quick Start"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get Haggle running locally in under 5 minutes
+  </Card>
+  <Card
+    title="How It Works"
+    icon="lightbulb"
+    href="/how-it-works"
+  >
+    Understand the complete workflow from query to negotiation
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/overview"
+  >
+    Explore the FastAPI endpoints and data models
+  </Card>
+  <Card
+    title="Architecture"
+    icon="diagram-project"
+    href="/platform/architecture"
+  >
+    Deep dive into the tech stack and system design
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<AccordionGroup>
+  <Accordion title="AI Task Inference" icon="brain">
+    Haggle uses **Grok LLM** to understand natural language requests like "fix my leaky faucet" and automatically infers the service type needed (e.g., plumber, electrician).
+
+    ```python
+    # From services/grok_llm.py:20
+    async def infer_task(query: str) -> str:
+        """Use Grok LLM to infer the service task from a user query."""
+        client = Client(api_key=XAI_API_KEY)
+        chat = client.chat.create(model="grok-3-fast")
+        
+        chat.append(system(system_prompt))
+        chat.append(user(f"What type of service professional is needed for: {query}"))
+        
+        for response, chunk in chat.stream():
+            if chunk.content:
+                full_response += chunk.content
+        
+        return full_response.strip().lower()
+    ```
+  </Accordion>
+
+  <Accordion title="Smart Clarifying Questions" icon="question">
+    After identifying the task, Haggle generates **3-5 contextual questions** to better understand your specific needs. These questions are tailored to the service type.
+
+    ```python
+    # From main.py:109
+    async def generate_clarifying_questions(
+        task: str,
+        query: str,
+        zip_code: str,
+        date_needed: str,
+        price_limit: Union[float, str]
+    ) -> List[Dict[str, str]]:
+        # Returns questions like:
+        # - "What is the specific issue you're experiencing?"
+        # - "Is water actively leaking right now?"
+        # - "How old is the fixture or pipe with the issue?"
+    ```
+  </Accordion>
+
+  <Accordion title="Automated Provider Discovery" icon="magnifying-glass">
+    Haggle uses **OpenAI's web search** to find local service providers in your area, extracting business names and phone numbers automatically.
+
+    ```python
+    # From services/grok_search.py:69
+    response = client.responses.create(
+        model="gpt-4o",
+        tools=[{"type": "web_search_preview"}],
+        input=f"Find {job.task} services near zip code {job.zip_code}",
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="AI Voice Negotiation" icon="phone">
+    The most powerful feature: Haggle **calls providers using AI voice agents** (powered by Grok Realtime API) and negotiates prices on your behalf.
+
+    ```python
+    # From backend/app.py:41
+    def generate_prompt(provider: dict) -> str:
+        return f"""
+        YOU ARE a homeowner calling for service.
+        Your task is to secure the lowest possible price, 
+        using ${provider.get('max_price', 200)} as a target range.
+        
+        Use common, human-like negotiation tactics to encourage 
+        the technician to drop their initial quote.
+        """
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Tech Stack
+
+Haggle is built with cutting-edge AI and modern web technologies:
+
+<CardGroup cols={3}>
+  <Card title="FastAPI" icon="python">
+    High-performance Python backend with async support
+  </Card>
+  <Card title="Next.js" icon="react">
+    Modern React framework for the frontend
+  </Card>
+  <Card title="Supabase" icon="database">
+    PostgreSQL database with realtime capabilities
+  </Card>
+  <Card title="Grok LLM" icon="brain">
+    xAI's language model for task inference and question generation
+  </Card>
+  <Card title="OpenAI" icon="openai">
+    Web search and advanced AI capabilities
+  </Card>
+  <Card title="Twilio" icon="phone">
+    Voice infrastructure for automated calls
+  </Card>
+</CardGroup>
+
+## Project Structure
+
+```bash
+haggle/
+├── main.py                  # Main FastAPI application
+├── backend/
+│   └── app.py              # Voice agent backend (Twilio + Grok Realtime)
+├── services/
+│   ├── grok_llm.py         # Task inference, questions, price extraction
+│   └── grok_search.py      # Provider discovery via OpenAI web search
+├── db/
+│   └── models.py           # Supabase provider models
+├── frontend/
+│   ├── app/
+│   │   └── page.tsx        # Main Next.js app
+│   ├── components/
+│   │   ├── landing-page.tsx
+│   │   ├── questions-flow.tsx
+│   │   └── call-console.tsx
+│   └── lib/
+│       └── api.ts          # Frontend API client
+└── schemas.py              # Pydantic data models
+```
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Home Repairs" icon="wrench">
+    Plumbing, electrical, HVAC, and general handyman services
+  </Card>
+  <Card title="Home Services" icon="broom">
+    Cleaning, painting, landscaping, and pest control
+  </Card>
+  <Card title="Professional Services" icon="briefcase">
+    Auto mechanics, locksmiths, and moving companies
+  </Card>
+  <Card title="Emergency Services" icon="circle-exclamation">
+    Urgent repairs with priority provider matching
+  </Card>
+</CardGroup>
+
+## Example Workflow
+
+Here's how a typical Haggle session works:
+
+```typescript
+// 1. User submits request
+const response = await startJob(
+  "fix my toilet",           // Natural language query
+  "123 Main St, San Jose",  // Address
+  "95126",                   // ZIP code
+  "$250",                    // Budget
+  "2025-12-10"              // Date needed
+)
+
+// 2. AI infers task and generates questions
+console.log(response.task)       // "plumber"
+console.log(response.questions)  // 5 clarifying questions
+
+// 3. User answers questions
+const result = await completeJob(response.job_id, {
+  q1: "The toilet is constantly running",
+  q2: "Yes, water runs non-stop",
+  // ...
+})
+
+// 4. System finds and saves providers
+console.log(result.providers)    // 5 local plumbers
+
+// 5. AI voice agents call and negotiate
+await startCalls(job_id)
+
+// 6. Get negotiated prices
+const status = await getProviderStatus(job_id)
+console.log(status[0].negotiated_price)  // $125 (saved $125!)
+```
+
+<Note>
+  **Phase 1 Complete**: The current version includes task inference, provider discovery, and database persistence. Voice negotiation is fully implemented via the backend service.
+</Note>
+
+## Why Haggle?
+
+<CardGroup cols={1}>
+  <Card title="Save Time" icon="clock">
+    No more calling 10+ providers yourself. Haggle handles all the calls in parallel.
+  </Card>
+  <Card title="Save Money" icon="dollar-sign">
+    AI negotiation agents work to get you the best price, often below initial quotes.
+  </Card>
+  <Card title="Save Energy" icon="battery-full">
+    Let AI handle the tedious work of explaining your problem repeatedly.
+  </Card>
+  <Card title="Transparent Process" icon="eye">
+    See real-time call status, transcripts, and negotiated prices.
+  </Card>
+</CardGroup>
+
+## What's Next?
+
+<Steps>
+  <Step title="Get Started">
+    Follow the [Quick Start guide](/quickstart) to run Haggle locally
+  </Step>
+  <Step title="Understand the Flow">
+    Read [How It Works](/how-it-works) to understand the complete workflow
+  </Step>
+  <Step title="Explore the API">
+    Check out the [API Reference](/api/overview) to integrate Haggle
+  </Step>
+  <Step title="Customize">
+    Learn how to add new service types and customize AI prompts
+  </Step>
+</Steps>
+
+<Warning>
+  **API Keys Required**: Haggle requires API keys for xAI (Grok), OpenAI, Twilio, and Supabase. See the [Quick Start](/quickstart) for setup instructions.
+</Warning>

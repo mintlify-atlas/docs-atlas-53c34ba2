@@ -1,0 +1,642 @@
+---
+title: 'Provider Search'
+description: 'Find local service providers using OpenAI web search'
+icon: 'magnifying-glass'
+---
+
+## Overview
+
+After inferring the service type and collecting job details, Haggle uses **OpenAI's Responses API with web search** to find local service providers. This eliminates the need to maintain a provider database and ensures users always get current, relevant results.
+
+<Note>
+  Provider search uses **GPT-4o** with the `web_search_preview` tool to find real businesses in the user's area.
+</Note>
+
+## How It Works
+
+<Steps>
+  <Step title="User Answers Clarifying Questions">
+    The frontend collects answers to all clarifying questions generated during task inference
+  </Step>
+  
+  <Step title="Complete Job API Called">
+    Answers are submitted to `/api/complete-job` along with the job ID
+  </Step>
+  
+  <Step title="Search Prompt Generated">
+    Haggle builds a structured search query from the job details
+  </Step>
+  
+  <Step title="OpenAI Web Search Executed">
+    The system calls OpenAI's Responses API with web_search tool enabled
+  </Step>
+  
+  <Step title="Results Parsed & Saved">
+    Provider names and phone numbers are extracted and stored in Supabase
+  </Step>
+</Steps>
+
+## Implementation
+
+### Complete Job Endpoint
+
+The `/api/complete-job` endpoint orchestrates the provider search:
+
+<CodeGroup>
+```python main.py:170-294
+@app.post("/api/complete-job", response_model=CompleteJobResponse)
+async def complete_job(request: CompleteJobRequest):
+    """
+    Complete a job with clarification answers and search for providers.
+    
+    Flow:
+    1. Retrieve job from memory
+    2. Merge clarification answers into job
+    3. Build search prompt from job JSON
+    4. Call OpenAI Web Search
+    5. Normalize and save providers to Supabase
+    6. Return job + providers
+    """
+    # Step 1: Retrieve job from memory
+    job = jobs_store.get(request.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+    
+    try:
+        # Step 2: Merge clarification answers
+        job.clarifications = request.answers
+        job.status = JobStatus.READY_FOR_SEARCH
+        
+        # Step 3 & 4: Search for providers using OpenAI Web Search
+        provider_creates = await search_providers(job)
+        
+        # Format context answers as a paragraph
+        context_answers_text = format_context_answers(request.answers, job.questions)
+        
+        # Format problem statement using Grok LLM
+        problem_statement = await format_problem_statement(job.original_query, job.task)
+        
+        # Parse price_limit to get max_price
+        max_price = None
+        if isinstance(job.price_limit, (int, float)):
+            max_price = float(job.price_limit)
+        elif isinstance(job.price_limit, str) and job.price_limit.lower() != "no_limit":
+            try:
+                max_price = float(job.price_limit)
+            except ValueError:
+                pass
+        
+        # Step 5: Save providers to Supabase
+        saved_providers = []
+        for pc in provider_creates:
+            db_provider = Provider(
+                job_id=pc.job_id,
+                service_provider=pc.name,
+                phone_number=pc.phone,
+                context_answers=context_answers_text,
+                house_address=job.house_address,
+                zip_code=job.zip_code,
+                max_price=max_price,
+                problem=problem_statement,
+                call_status="pending"  # Initialize as pending
+            )
+            
+            created_provider = create_provider(db_provider)
+            
+            saved_providers.append(ProviderSchema(
+                id=created_provider.id,
+                job_id=created_provider.job_id,
+                name=created_provider.service_provider,
+                phone=created_provider.phone_number,
+                estimated_price=created_provider.minimum_quote,
+                negotiated_price=created_provider.negotiated_price,
+                call_status=created_provider.call_status or "pending"
+            ))
+        
+        # Update job status
+        job.status = JobStatus.SEARCHED
+        jobs_store[request.job_id] = job
+        
+        return CompleteJobResponse(
+            job=job,
+            providers=saved_providers
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error completing job: {str(e)}")
+```
+
+```json Request Example
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "answers": {
+    "q1": "The toilet is constantly running",
+    "q2": "Yes, water runs non-stop",
+    "q3": "About 10 years old",
+    "q4": "No water damage visible",
+    "q5": "Not an emergency, can wait a day"
+  }
+}
+```
+
+```json Response Example
+{
+  "job": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "original_query": "fix my toilet",
+    "task": "plumber",
+    "zip_code": "95126",
+    "clarifications": {
+      "q1": "The toilet is constantly running",
+      "q2": "Yes, water runs non-stop"
+    },
+    "status": "searched"
+  },
+  "providers": [
+    {
+      "id": 1,
+      "job_id": "550e8400-...",
+      "name": "Reliable Plumbing Services",
+      "phone": "(408) 555-0101",
+      "call_status": "pending"
+    },
+    {
+      "id": 2,
+      "job_id": "550e8400-...",
+      "name": "Quick Drain Solutions",
+      "phone": "(408) 555-0102",
+      "call_status": "pending"
+    }
+  ]
+}
+```
+</CodeGroup>
+
+### Search Prompt Construction
+
+Haggle builds a targeted search prompt from the job details:
+
+```python grok_search.py:31-51
+def build_search_prompt(job: Job) -> str:
+    """
+    Construct a search prompt from the Job JSON.
+    
+    Args:
+        job: The complete Job object with all clarifications
+        
+    Returns:
+        A detailed search prompt for finding providers
+    """
+    prompt = f"""Find {job.task} services near zip code {job.zip_code}.
+
+Search the web for local {job.task}s and provide a list with:
+1. Business name
+2. Phone number
+
+Format each result as: NAME | PHONE
+
+Find up to {MAX_PROVIDERS} providers near {job.zip_code}."""
+
+    return prompt
+```
+
+<Tabs>
+  <Tab title="Example Prompt">
+    ```text
+    Find plumber services near zip code 95126.
+
+    Search the web for local plumbers and provide a list with:
+    1. Business name
+    2. Phone number
+
+    Format each result as: NAME | PHONE
+
+    Find up to 5 providers near 95126.
+    ```
+  </Tab>
+  
+  <Tab title="Search Configuration">
+    ```python
+    MAX_PROVIDERS = 5  # From config.py
+    ```
+  </Tab>
+</Tabs>
+
+### OpenAI Web Search Service
+
+The core search implementation uses OpenAI's Responses API:
+
+```python grok_search.py:54-111
+async def search_providers(job: Job) -> List[ProviderCreate]:
+    """
+    Search for service providers using OpenAI web search.
+    
+    Runs the synchronous SDK in a thread pool to avoid blocking.
+    
+    Args:
+        job: The complete Job object
+        
+    Returns:
+        List of ProviderCreate objects with name, phone
+    """
+    # Use fallback if no API key is configured
+    if not OPENAI_API_KEY:
+        print("⚠️  No OPENAI_API_KEY set - using fallback providers")
+        return _fallback_providers(job)
+    
+    # Run synchronous SDK call in thread pool
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, _sync_search_providers, job)
+
+
+def _sync_search_providers(job: Job) -> List[ProviderCreate]:
+    """
+    Synchronous implementation of provider search using OpenAI web search.
+    Called from thread pool to avoid blocking async event loop.
+    """
+    search_prompt = build_search_prompt(job)
+    
+    print(f"\n[OpenAI Search] Query:\n{search_prompt}\n", flush=True)
+    
+    try:
+        # Initialize OpenAI Client
+        client = OpenAI(api_key=OPENAI_API_KEY, organization=OPENAI_ORG_API_KEY)
+        
+        print("[OpenAI Search] Calling web_search tool...", flush=True)
+        
+        # Create response using web search tool
+        response = client.responses.create(
+            model="gpt-4o",
+            tools=[{"type": "web_search_preview"}],
+            input=search_prompt,
+        )
+        
+        # Get the output text
+        full_response = response.output_text
+        
+        print(f"\n[OpenAI Search] Response received ({len(full_response)} chars)")
+        print(f"\n{full_response}\n", flush=True)
+        
+        # Parse providers from response
+        providers = parse_provider_response(full_response, job.id)
+        
+        return providers if providers else _fallback_providers(job)
+        
+    except Exception as e:
+        print(f"OpenAI Search API exception: {e}")
+        return _fallback_providers(job)
+```
+
+<Info>
+  The search runs in a thread pool executor to prevent blocking the async event loop, since the OpenAI SDK is synchronous.
+</Info>
+
+### Response Parsing
+
+Haggle extracts provider information from the OpenAI response using regex:
+
+```python grok_search.py:114-182
+def parse_provider_response(content: str, job_id: str) -> List[ProviderCreate]:
+    """
+    Parse the response into ProviderCreate objects.
+    
+    Handles multiple formats:
+    - NAME | PHONE
+    - NAME - PHONE  
+    - **NAME** | PHONE
+    - 1. NAME | PHONE
+    
+    Args:
+        content: Raw response content
+        job_id: The job ID to associate with providers
+        
+    Returns:
+        List of ProviderCreate objects
+    """
+    providers = []
+    lines = content.strip().split("\n")
+    
+    # Phone number regex - matches (xxx) xxx-xxxx, xxx-xxx-xxxx, etc.
+    phone_pattern = re.compile(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}')
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Skip header-like lines
+        if "name" in line.lower() and "phone" in line.lower():
+            continue
+        if line.startswith("---") or line.startswith("==="):
+            continue
+            
+        # Try to find a phone number in the line
+        phone_match = phone_pattern.search(line)
+        if not phone_match:
+            continue
+            
+        phone = phone_match.group()
+        
+        # Extract name - everything before the phone number, cleaned up
+        name_part = line[:phone_match.start()]
+        
+        # Clean up the name
+        name = name_part.strip()
+        # Remove common prefixes/formatting
+        name = re.sub(r'^[\d]+[.\)]\s*', '', name)  # Remove "1." or "1)"
+        name = re.sub(r'^\*+', '', name)  # Remove leading asterisks
+        name = re.sub(r'\*+$', '', name)  # Remove trailing asterisks
+        name = re.sub(r'^[-|:]\s*', '', name)  # Remove leading dash/pipe/colon
+        name = re.sub(r'[-|:]\s*$', '', name)  # Remove trailing dash/pipe/colon
+        name = name.strip()
+        
+        # Skip if name is empty or too short
+        if not name or len(name) < 3:
+            continue
+        
+        # Skip if name looks like a header
+        if name.lower() in ["name", "business", "provider", "company"]:
+            continue
+            
+        providers.append(ProviderCreate(
+            job_id=job_id,
+            name=name,
+            phone=phone
+        ))
+    
+    return providers[:MAX_PROVIDERS]
+```
+
+<CardGroup cols={2}>
+  <Card title="Supported Formats" icon="list">
+    - `Reliable Plumbing | (408) 555-0101`
+    - `**Quick Drain** - 408-555-0102`
+    - `1. Bay Area Plumbers | 408.555.0103`
+    - `Master Plumbing: (408) 555-0104`
+  </Card>
+  <Card title="Phone Patterns" icon="phone">
+    - `(408) 555-0101`
+    - `408-555-0102`
+    - `408.555.0103`
+    - `4085550104`
+  </Card>
+</CardGroup>
+
+## Fallback Providers
+
+When the API is unavailable, Haggle uses task-specific mock data:
+
+```python grok_search.py:185-243
+def _fallback_providers(job: Job) -> List[ProviderCreate]:
+    """
+    Fallback provider data for development/testing when API is unavailable.
+    
+    Returns realistic-looking mock data based on the task type.
+    """
+    task = job.task.lower()
+    zip_code = job.zip_code
+    
+    mock_providers = {
+        "plumber": [
+            ("Reliable Plumbing Services", "(408) 555-0101", 150.0),
+            ("Quick Drain Solutions", "(408) 555-0102", 125.0),
+            ("Bay Area Master Plumbers", "(408) 555-0103", 175.0),
+            ("24/7 Emergency Plumbing", "(408) 555-0104", 200.0),
+            ("Budget Plumbing Co.", "(408) 555-0105", 100.0),
+        ],
+        "electrician": [
+            ("Bright Spark Electric", "(408) 555-0201", 175.0),
+            ("Safe Home Electrical", "(408) 555-0202", 150.0),
+            ("PowerUp Electricians", "(408) 555-0203", 200.0),
+            ("Circuit Masters", "(408) 555-0204", 165.0),
+            ("Volt Electric Services", "(408) 555-0205", 140.0),
+        ],
+        # ... more task types
+    }
+    
+    # Get task-specific or default providers
+    default_providers = [
+        ("Local Service Pro #1", "(408) 555-0001", 150.0),
+        ("Trusted Handyman Services", "(408) 555-0002", 125.0),
+        ("Quick Fix Solutions", "(408) 555-0003", 175.0),
+        ("Reliable Home Services", "(408) 555-0004", 140.0),
+        ("Expert Service Co.", "(408) 555-0005", 160.0),
+    ]
+    
+    provider_list = mock_providers.get(task, default_providers)
+    
+    return [
+        ProviderCreate(
+            job_id=job.id,
+            name=name,
+            phone=phone
+        )
+        for name, phone, _ in provider_list[:MAX_PROVIDERS]
+    ]
+```
+
+## Database Storage
+
+Providers are stored in Supabase with all necessary context for the voice agent:
+
+<Tabs>
+  <Tab title="Provider Schema">
+    ```python
+    class Provider:
+        id: int
+        job_id: str
+        service_provider: str  # Business name
+        phone_number: str
+        context_answers: str  # Formatted Q&A paragraph
+        house_address: str
+        zip_code: str
+        max_price: float
+        problem: str  # Formatted problem statement
+        call_status: str  # pending, in_progress, completed, failed
+        negotiated_price: float  # Set after successful call
+        call_transcript: str  # Full conversation transcript
+    ```
+  </Tab>
+  
+  <Tab title="Context Formatting">
+    ```python db/models.py
+    def format_context_answers(
+        answers: Dict[str, str],
+        questions: List[ClarifyingQuestion]
+    ) -> str:
+        """Format Q&A as a natural paragraph."""
+        formatted = []
+        for q in questions:
+            answer = answers.get(q.id)
+            if answer:
+                formatted.append(f"{q.question} {answer}")
+        return ". ".join(formatted)
+    ```
+    
+    Example output:
+    ```
+    What is the specific issue? The toilet is constantly running. 
+    Is water actively leaking? Yes, water runs non-stop. 
+    How old is the fixture? About 10 years old.
+    ```
+  </Tab>
+</Tabs>
+
+## Provider Status Tracking
+
+The system tracks each provider's call status:
+
+<CodeGroup>
+```python Fetch Provider Status
+@app.get("/api/providers/{job_id}/status")
+async def get_providers_status(job_id: str):
+    """
+    Get all providers for a job with their call status and negotiated prices.
+    This endpoint is optimized for polling by the frontend.
+    """
+    providers = get_providers_by_job_id(job_id)
+    return [
+        {
+            "id": p.id,
+            "job_id": p.job_id,
+            "name": p.service_provider,
+            "phone": p.phone_number,
+            "estimated_price": p.minimum_quote,
+            "negotiated_price": p.negotiated_price,
+            "call_status": p.call_status or "pending",
+            "call_transcript": p.call_transcript
+        }
+        for p in providers
+    ]
+```
+
+```json Status Response
+[
+  {
+    "id": 1,
+    "name": "Reliable Plumbing Services",
+    "phone": "(408) 555-0101",
+    "call_status": "completed",
+    "negotiated_price": 125.00,
+    "call_transcript": "[USER]: Hi, is this Reliable Plumbing?..."
+  },
+  {
+    "id": 2,
+    "name": "Quick Drain Solutions",
+    "phone": "(408) 555-0102",
+    "call_status": "in_progress",
+    "negotiated_price": null
+  },
+  {
+    "id": 3,
+    "name": "Bay Area Plumbers",
+    "phone": "(408) 555-0103",
+    "call_status": "pending",
+    "negotiated_price": null
+  }
+]
+```
+</CodeGroup>
+
+## User Workflow
+
+<Steps>
+  <Step title="Submit Job Details">
+    User submits initial query and answers clarifying questions
+  </Step>
+  
+  <Step title="Providers Found">
+    OpenAI web search returns 3-5 local providers
+  </Step>
+  
+  <Step title="Review Results">
+    User sees list of providers with names and phone numbers
+  </Step>
+  
+  <Step title="Start Calls">
+    User clicks "Start Negotiating" to begin automated calls
+  </Step>
+  
+  <Step title="Monitor Progress">
+    Frontend polls `/api/providers/{job_id}/status` to show real-time updates
+  </Step>
+  
+  <Step title="Compare Offers">
+    After calls complete, user sees negotiated prices and selects best option
+  </Step>
+</Steps>
+
+## Integration Example
+
+```javascript Frontend Integration
+// Step 1: Complete job with answers
+const completeResponse = await fetch('/api/complete-job', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    job_id: jobId,
+    answers: {
+      q1: "The toilet is constantly running",
+      q2: "Yes, water runs non-stop",
+      q3: "About 10 years old"
+    }
+  })
+});
+
+const { job, providers } = await completeResponse.json();
+console.log(`Found ${providers.length} providers`);
+
+// Step 2: Display providers
+providers.forEach(provider => {
+  console.log(`${provider.name} - ${provider.phone}`);
+});
+
+// Step 3: Start automated calls
+await fetch(`/api/start-calls/${jobId}`, { method: 'POST' });
+
+// Step 4: Poll for status updates
+const pollStatus = setInterval(async () => {
+  const statusResponse = await fetch(`/api/providers/${jobId}/status`);
+  const statuses = await statusResponse.json();
+  
+  statuses.forEach(p => {
+    console.log(`${p.name}: ${p.call_status}`);
+    if (p.negotiated_price) {
+      console.log(`  Negotiated: $${p.negotiated_price}`);
+    }
+  });
+  
+  // Stop polling when all calls complete
+  if (statuses.every(p => ['completed', 'failed'].includes(p.call_status))) {
+    clearInterval(pollStatus);
+  }
+}, 3000);
+```
+
+## Benefits
+
+<CardGroup cols={2}>
+  <Card title="Always Current" icon="rotate">
+    Web search finds active businesses, no stale database
+  </Card>
+  <Card title="Wide Coverage" icon="map">
+    Works for any location and service type
+  </Card>
+  <Card title="No Maintenance" icon="check">
+    No need to maintain provider listings or verify contacts
+  </Card>
+  <Card title="Structured Output" icon="table">
+    GPT-4o follows formatting instructions for easy parsing
+  </Card>
+</CardGroup>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="AI Task Inference" icon="brain-circuit" href="/features/ai-task-inference">
+    Learn how Haggle classifies service requests
+  </Card>
+  <Card title="Automated Negotiation" icon="handshake" href="/features/automated-negotiation">
+    See how the voice agent calls and negotiates with providers
+  </Card>
+</CardGroup>
