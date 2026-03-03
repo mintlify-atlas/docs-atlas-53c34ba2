@@ -1,0 +1,88 @@
+{
+  "projectType": "saas",
+  "projectName": "Haggle",
+  "projectDescription": "AI-powered service marketplace that automatically finds providers and negotiates prices on your behalf using voice agents.",
+  "theme": "palm",
+  "primaryColor": "#3b82f6",
+  "lightColor": "#60a5fa",
+  "darkColor": "#2563eb",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart", "how-it-works"]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/ai-task-inference",
+              "features/provider-search",
+              "features/automated-negotiation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/setup",
+              "guides/configuration",
+              "guides/running-locally"
+            ]
+          },
+          {
+            "group": "Platform",
+            "pages": [
+              "platform/architecture",
+              "platform/database-schema",
+              "platform/integrations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/start-job",
+              "api/complete-job",
+              "api/providers"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "api/grok-llm",
+              "api/grok-search",
+              "api/voice-agent"
+            ]
+          },
+          {
+            "group": "Schemas",
+            "pages": ["api/schemas"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "AI-powered task inference from natural language queries",
+    "Automated provider discovery using Grok Fast Search",
+    "Real-time voice agent negotiation with service providers",
+    "Multi-provider bidding and price comparison",
+    "Complete workflow from query to booked appointment"
+  ],
+  "publicApiSurface": [
+    "POST /api/start-job",
+    "POST /api/complete-job",
+    "GET /api/jobs/{job_id}",
+    "GET /api/providers",
+    "GET /api/providers/{job_id}",
+    "GET /api/providers/{job_id}/status",
+    "POST /api/start-calls/{job_id}"
+  ]
+}
